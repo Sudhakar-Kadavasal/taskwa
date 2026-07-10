@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Groups{% endblock %}
+{% block content %}
+<h1>WhatsApp groups</h1>
+<div class="card">
+  <table>
+    <tr><th>Name</th><th>Chat ID</th><th>Status</th><th></th></tr>
+    {% for g in groups %}
+    <tr>
+      <td>{{ g.name }}</td><td><code>{{ g.chat_id }}</code></td>
+      <td>{% if g.active %}<span class="badge b-done">active</span>
+          {% else %}<span class="badge b-cancelled">inactive</span>{% endif %}</td>
+      <td><form method="post" action="/groups/{{ g.id }}/toggle" class="inline-form">
+        <button class="ghost">{{ 'Deactivate' if g.active else 'Reactivate' }}</button>
+      </form></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">No groups registered yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Detect my groups</h2>
+  <p class="muted">Add the bot's WhatsApp number to the group first, then click
+     detect — every group the bot belongs to appears below with a one-click
+     register.</p>
+  <a href="/groups?detect=1"><button>Detect my groups</button></a>
+  {% if detect_ran %}
+    {% if detected %}
+    <table style="margin-top:12px">
+      <tr><th>Group</th><th>Chat ID</th><th></th></tr>
+      {% for d in detected %}
+      <tr>
+        <td>{{ d.name }}</td>
+        <td><code>{{ d.chat_id }}</code></td>
+        <td>
+          <form method="post" action="/groups/add" class="inline-form">
+            <input type="hidden" name="name" value="{{ d.name }}">
+            <input type="hidden" name="chat_id" value="{{ d.chat_id }}">
+            <button class="ghost">Register</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% elif detect_failed %}
+    <div class="banner bad" style="margin-top:12px">No groups found. Check that
+      the gateway session is WORKING (Health page) and that the bot's number has
+      been added to at least one group.</div>
+    {% else %}
+    <p class="muted" style="margin-top:12px">No new groups — everything the bot
+       belongs to is already registered above.</p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Register manually</h2>
+  <form method="post" action="/groups/add">
+    <div class="grid">
+      <div><label>Group name</label><input name="name" required></div>
+      <div><label>Chat ID</label><input name="chat_id" placeholder="12036…@g.us" required></div>
+    </div>
+    <br><button>Register</button>
+  </form>
+</div>
+{% endblock %}

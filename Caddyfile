@@ -1,0 +1,5 @@
+# Only used with:  docker compose --profile caddy up -d
+# Replace tasks.example.com with your domain (DNS A record -> VPS IP).
+tasks.example.com {
+    reverse_proxy app:8000
+}

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Tasks{% endblock %}
+{% block content %}
+<h1>Tasks</h1>
+
+<div class="card">
+  <form method="get" action="/" class="grid">
+    <div><label>Status</label>
+      <select name="status" onchange="this.form.submit()">
+        {% for st in ['open','in_progress','blocked','done','cancelled'] %}
+          <option value="{{ st }}" {% if f_status==st %}selected{% endif %}>{{ st.replace('_',' ') }}</option>
+        {% endfor %}
+        <option value="open" {% if f_status=='open' %}selected{% endif %}>all open</option>
+      </select></div>
+    <div><label>Assignee</label>
+      <select name="assignee" onchange="this.form.submit()">
+        <option value="0">everyone</option>
+        {% for m in members %}
+          <option value="{{ m.id }}" {% if f_assignee==m.id %}selected{% endif %}>{{ m.name }}</option>
+        {% endfor %}
+      </select></div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>#</th><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th>
+        <th>Status</th><th>Actions</th></tr>
+    {% for t in tasks %}
+    <tr>
+      <td><b>{{ t.id }}</b></td>
+      <td>{{ t.title }}
+        {% if t.status=='blocked' %}<div class="muted" style="color:var(--red)">
+          Blocked {{ t.blocked_days }}d: {{ t.blocker_reason }}</div>{% endif %}
+        {% if t.description %}<div class="muted">{{ t.description }}</div>{% endif %}
+        {% if t.group %}<div class="muted">posts to: {{ t.group.name }}</div>{% endif %}
+      </td>
+      <td>{{ t.assignee.name }}</td>
+      <td class="p-{{ t.priority }}">{{ t.priority }}</td>
+      <td>{% if t.due_date %}
+            <span {% if t.due_date < today and t.is_open %}class="overdue"{% endif %}>
+              {{ t.due_date.strftime('%d %b') }}</span>
+          {% endif %}</td>
+      <td><span class="badge b-{{ t.status }}">{{ t.status.replace('_',' ') }}</span></td>
+      <td>
+        <form method="post" action="/tasks/{{ t.id }}/status" class="inline-form">
+          <select name="new_status">
+            {% for st in ['open','in_progress','blocked','done','cancelled'] %}
+              <option value="{{ st }}">{{ st.replace('_',' ') }}</option>
+            {% endfor %}
+          </select>
+          <input name="note" placeholder="note / blocker reason" style="width:140px">
+          <button class="ghost">Set</button>
+        </form>
+        <details>
+          <summary>edit</summary>
+          <form method="post" action="/tasks/{{ t.id }}/edit">
+            <input name="title" value="{{ t.title }}">
+            <select name="assignee_id">
+              {% for m in members %}<option value="{{ m.id }}"
+                {% if m.id==t.assignee_id %}selected{% endif %}>{{ m.name }}</option>{% endfor %}
+            </select>
+            <select name="priority">
+              {% for p in priorities %}<option {% if p==t.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}
+            </select>
+            <input type="date" name="due_date" value="{{ t.due_date or '' }}">
+            <input name="description" value="{{ t.description }}" placeholder="description">
+            <select name="post_to_group_id">
+              <option value="">no group post</option>
+              {% for g in groups %}<option value="{{ g.id }}"
+                {% if g.id==t.post_to_group_id %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+            </select>
+            <button>Save</button>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No tasks match this filter.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">New task</h2>
+  <form method="post" action="/tasks/create">
+    <div class="grid">
+      <div style="grid-column: span 2"><label>Title</label>
+        <input name="title" required></div>
+      <div><label>Assignee</label>
+        <select name="assignee_id">
+          {% for m in members %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
+        </select></div>
+      <div><label>Priority</label>
+        <select name="priority">
+          <option>low</option><option selected>medium</option><option>high</option>
+        </select></div>
+      <div><label>Due date</label><input type="date" name="due_date"></div>
+      <div><label>Also post to group</label>
+        <select name="post_to_group_id">
+          <option value="">no</option>
+          {% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <label>Description (optional)</label>
+    <input name="description">
+    <br><br><button>Create task</button>
+  </form>
+</div>
+
+<p class="muted">Exports: <a href="/export/tasks.csv">tasks.csv</a> ·
+  <a href="/export/audit.csv">audit.csv</a></p>
+{% endblock %}

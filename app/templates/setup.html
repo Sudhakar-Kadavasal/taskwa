@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Setup</title>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<main>
+<h1>Setup wizard</h1>
+<p class="muted">The system starts in <b>dry-run</b> mode — nothing is sent to
+your team until you switch it off in Settings after setup.</p>
+
+<div class="card step">
+  <h2>1 — Admin password {% if has_pw %}(done){% endif %}</h2>
+  <form method="post" action="/setup/password">
+    <label>Password (8+ characters)</label>
+    <input type="password" name="password" minlength="8" required style="max-width:320px">
+    <br><br><button>{% if has_pw %}Change{% else %}Set password{% endif %}</button>
+  </form>
+</div>
+
+<div class="card step">
+  <h2>2 — Pair WhatsApp <span class="badge {% if gateway_status=='WORKING' %}b-done{% else %}b-blocked{% endif %}">{{ gateway_status }}</span></h2>
+  {% if gateway_status == 'WORKING' %}
+    <p>Paired and working.</p>
+  {% else %}
+    <form method="post" action="/setup/start-session" class="inline-form">
+      <button class="ghost">Start / restart session</button>
+    </form>
+    <p>Then scan this QR with the <b>dedicated number's</b> phone
+       (WhatsApp &gt; Linked devices &gt; Link a device). Refresh this page after scanning.</p>
+    <img src="/qr.png" alt="QR not available yet — click start, wait 10s, refresh"
+         style="max-width:280px">
+  {% endif %}
+</div>
+
+<div class="card step">
+  <h2>3 — Timezone &amp; daily send time</h2>
+  <form method="post" action="/setup/basics">
+    <div class="grid">
+      <div><label>IANA timezone</label>
+        <input name="timezone" value="{{ timezone }}" placeholder="Asia/Dubai"></div>
+      <div><label>Send time(s), comma-separated 24h</label>
+        <input name="send_times" value="{{ send_times }}" placeholder="08:00"></div>
+    </div>
+    <br><button>Save</button>
+  </form>
+</div>
+
+<div class="card step">
+  <h2>4 — Team members</h2>
+  <form method="post" action="/setup/member">
+    <div class="grid">
+      <div><label>Name</label><input name="name" required></div>
+      <div><label>WhatsApp number (with country code, digits only)</label>
+        <input name="phone" placeholder="9715xxxxxxxx" required></div>
+      <div><label>Role</label>
+        <select name="role"><option>member</option><option>admin</option></select></div>
+    </div>
+    <br><button>Add member</button>
+  </form>
+  {% if members %}
+  <table style="margin-top:12px"><tr><th>Name</th><th>Phone</th><th>Role</th></tr>
+    {% for m in members %}<tr><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  <p class="muted">Add yourself as <b>admin</b> — blocker alerts and the password
+     reset code go to admin numbers.</p>
+</div>
+
+<div class="card step">
+  <h2>5 — Test &amp; finish</h2>
+  <form method="post" action="/setup/test" class="inline-form">
+    <button class="ghost">Send test message to admin</button>
+  </form>
+  <form method="post" action="/setup/finish" class="inline-form">
+    <button>Finish setup</button>
+  </form>
+  <p class="muted">In dry-run the test appears in Health &gt; message log instead
+     of WhatsApp — that's expected.</p>
+</div>
+</main>
+</body></html>

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+<h1>Team members</h1>
+<div class="card">
+  <table>
+    <tr><th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th></th></tr>
+    {% for m in members %}
+    <tr>
+      <td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td>
+      <td>{% if m.active %}<span class="badge b-done">active</span>
+          {% else %}<span class="badge b-cancelled">inactive</span>{% endif %}</td>
+      <td><form method="post" action="/members/{{ m.id }}/toggle" class="inline-form">
+        <button class="ghost">{{ 'Deactivate' if m.active else 'Reactivate' }}</button>
+      </form></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Add member</h2>
+  <form method="post" action="/members/add">
+    <div class="grid">
+      <div><label>Name</label><input name="name" required></div>
+      <div><label>WhatsApp number (country code + number, digits only)</label>
+        <input name="phone" placeholder="9715xxxxxxxx" required></div>
+      <div><label>Role</label>
+        <select name="role"><option>member</option><option>admin</option></select></div>
+    </div>
+    <br><button>Add</button>
+  </form>
+  <p class="muted">Deactivating a member stops their digests and commands.
+     Reassign their open tasks from the Tasks page first.</p>
+</div>
+{% endblock %}

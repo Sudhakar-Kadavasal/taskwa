@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Health{% endblock %}
+{% block content %}
+<h1>Health</h1>
+
+<div class="card">
+  <p>Gateway session:
+    <span class="badge {% if status=='WORKING' %}b-done{% else %}b-blocked{% endif %}">{{ status }}</span>
+  </p>
+  <p class="muted">Last digest run: {{ last_send | localtime }} ·
+     Last backup: {{ last_backup | localtime }} ·
+     All times in {{ tzname }}</p>
+  {% if status != 'WORKING' %}
+    <form method="post" action="/health/start-session" class="inline-form">
+      <button>Start / restart session</button>
+    </form>
+    <p>If a QR appears below, scan it with the dedicated number's phone
+       (WhatsApp &gt; Linked devices), then refresh.</p>
+    <img src="/qr.png" alt="No QR available" style="max-width:280px">
+  {% endif %}
+  <form method="post" action="/health/send-digests-now" class="inline-form"
+        style="margin-left:8px">
+    <button class="ghost">Run digests now</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Recent outbound messages</h2>
+  <table>
+    <tr><th>When ({{ tzname }})</th><th>To</th><th>Status</th><th>Message</th></tr>
+    {% for r in log_rows %}
+    <tr>
+      <td>{{ r.created_at | localtime }}</td>
+      <td><code>{{ r.chat_id }}</code></td>
+      <td><span class="badge {% if r.status=='sent' %}b-done{% elif r.status=='dryrun' %}b-in_progress{% else %}b-blocked{% endif %}">{{ r.status }}</span>
+          {% if r.detail %}<div class="muted">{{ r.detail }}</div>{% endif %}</td>
+      <td style="white-space:pre-wrap; font-size:12px">{{ r.text[:400] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">Nothing sent yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

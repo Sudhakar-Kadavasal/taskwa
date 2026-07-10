@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Reset password</title>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<div class="auth-box card">
+  <div class="brand">Reset password</div>
+  {% if info %}<div class="banner ok">{{ info }}</div>{% endif %}
+  {% if error %}<div class="banner bad">{{ error }}</div>{% endif %}
+  <form method="post" action="/reset">
+    <label>6-digit code (sent to admin WhatsApp)</label>
+    <input name="code" pattern="\d{6}" required>
+    <label>New password (8+ characters)</label>
+    <input type="password" name="password" minlength="8" required>
+    <br><br><button style="width:100%">Set new password</button>
+  </form>
+  <p class="muted">Gateway down too? Run:
+    <code>docker compose exec app python -m app.cli reset-password</code></p>
+</div>
+</body></html>

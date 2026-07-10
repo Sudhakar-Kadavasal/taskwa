@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<div class="card">
+  <form method="post" action="/settings">
+    <div class="grid">
+      <div><label>IANA timezone</label>
+        <input name="timezone" value="{{ timezone }}"></div>
+      <div><label>Daily send time(s), comma-separated (24h)</label>
+        <input name="send_times" value="{{ send_times }}"></div>
+      <div><label>Acknowledgment mode</label>
+        <select name="ack_mode">
+          <option value="reaction" {% if ack_mode=='reaction' %}selected{% endif %}>reaction (thumbs-up, recommended)</option>
+          <option value="reply" {% if ack_mode=='reply' %}selected{% endif %}>text reply</option>
+          <option value="none" {% if ack_mode=='none' %}selected{% endif %}>silent</option>
+        </select></div>
+      <div><label>Hourly send cap</label>
+        <input type="number" name="hourly_cap" value="{{ hourly_cap }}" min="1"></div>
+      <div><label>Purge completed tasks after (days)</label>
+        <input type="number" name="purge_after_days" value="{{ purge_after_days }}" min="1"></div>
+      <div><label>Dry-run mode (log only, send nothing)</label>
+        <input type="checkbox" name="dry_run" {% if dry_run %}checked{% endif %}
+               style="width:auto"></div>
+      <div><label>Personal number mode (bot shares the owner's own WhatsApp)</label>
+        <input type="checkbox" name="personal_mode" {% if personal_mode %}checked{% endif %}
+               style="width:auto"></div>
+    </div>
+    <br><button>Save settings</button>
+  </form>
+  <p class="muted"><b>Personal number mode:</b> the bot stays silent on
+     anything that isn't a recognised command - no help hints, no media replies -
+     so human conversations are never interrupted. Your own digest arrives in
+     "Message Yourself" and you reply to it there. Warning: a WhatsApp ban in
+     this mode hits your personal account.</p>
+  <p class="muted">Purged tasks are archived to <code>backups/archive.csv</code>
+     before deletion. Gateway URL, secrets and SMTP alerts are configured in
+     <code>.env</code> (restart required).</p>
+</div>
+{% endblock %}

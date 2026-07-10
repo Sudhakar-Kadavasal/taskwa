@@ -1,0 +1,161 @@
+=======================================================================
+ TaskWa - INSTALLATION, step by step
+ Run each block in order. Companion PDF with pictures:
+ docs/TaskWa-Installation-Guide.pdf
+=======================================================================
+
+STEP 0 - PREREQUISITES (once)
+-----------------------------------------------------------------------
+* A computer that stays on (Mac / Windows / Linux).
+* A WhatsApp number for the bot: a dedicated SIM, or your own number
+  (then enable "Personal number mode" in Settings later).
+* The phone carrying that number, for one QR scan.
+* Docker:
+    macOS   : https://docker.com/products/docker-desktop
+              (Apple Silicon build for M-series Macs). Launch it once,
+              approve the prompts, and in Settings > General enable
+              "Start Docker Desktop when you sign in".
+    Windows : same URL. Requires WSL2; enable virtualization in BIOS
+              if the installer asks.
+    Linux   : curl -fsSL https://get.docker.com | sh
+
+  Verify (open a NEW terminal after installing):
+
+    docker --version
+
+
+STEP 1 - GET TASKWA
+-----------------------------------------------------------------------
+    git clone https://github.com/sudhakar-kadavasal/taskwa.git
+    cd taskwa
+
+  (No git? Download the release ZIP, unzip, then: cd taskwa)
+
+
+STEP 2 - SECRETS (fully automatic)
+-----------------------------------------------------------------------
+  Copy-paste this whole block. It creates .env, generates the three
+  random secrets, and detects your CPU to enable the ARM gateway image
+  when needed (Apple Silicon Macs, Raspberry Pi).
+  Windows: run it in Git Bash (installed with Git), not PowerShell.
+
+    cp .env.example .env
+
+    for key in WEBHOOK_SECRET APP_SECRET WAHA_API_KEY; do
+      val=$(openssl rand -hex 24)
+      if [ "$(uname)" = "Darwin" ]; then
+        sed -i '' "s|^$key=.*|$key=$val|" .env
+      else
+        sed -i "s|^$key=.*|$key=$val|" .env
+      fi
+    done
+
+    case "$(uname -m)" in
+      arm64|aarch64)
+        if [ "$(uname)" = "Darwin" ]; then
+          sed -i '' 's|^# *WAHA_TAG=arm|WAHA_TAG=arm|' .env
+        else
+          sed -i 's|^# *WAHA_TAG=arm|WAHA_TAG=arm|' .env
+        fi ;;
+    esac
+
+    grep -q change-me .env && echo "!! secrets NOT set" || echo "secrets OK"
+
+  It must print "secrets OK". If it printed "!! secrets NOT set" (or
+  you cannot use Git Bash), do it manually instead: run
+  "openssl rand -hex 24" three times and paste one result into each of
+  WEBHOOK_SECRET / APP_SECRET / WAHA_API_KEY inside .env, and on
+  Apple Silicon / Raspberry Pi also uncomment the WAHA_TAG=arm line.
+
+
+STEP 3 - START
+-----------------------------------------------------------------------
+  This step needs Docker RUNNING - you installed it in Step 0, right?
+  If not, get it now: https://docker.com/products/docker-desktop
+  (launch it once, wait for the whale icon, then come back here)
+
+    docker compose up -d
+
+  First run downloads ~1 GB. Then check:
+
+    docker compose ps
+
+  Both containers must show "Up". Give the gateway a full minute
+  after that before the next step.
+
+
+STEP 4 - SETUP WIZARD
+-----------------------------------------------------------------------
+  Open in your browser:      http://localhost:3000
+
+    1. Set the admin password (8+ characters)
+    2. Pair WhatsApp: click "Start / restart session", wait ~15 s,
+       refresh; scan the QR with the bot number's phone
+       (WhatsApp > Settings > Linked devices > Link a device)
+    3. Timezone (e.g. Asia/Dubai) and daily send time(s) (e.g. 08:00)
+    4. Add members: name + number, digits only with country code
+       (9715xxxxxxxx). Add yourself first, role: admin.
+    5. Send the test message, then Finish.
+
+  NOTES:
+  * TaskWa starts in DRY-RUN - messages are logged on the Health
+    page, not sent. Nothing reaches any phone yet.
+  * Using your OWN personal WhatsApp number as the bot? After the
+    wizard, go to Settings and tick "Personal number mode" (details
+    in Step 6). Your daily digest will arrive in WhatsApp's
+    "Message Yourself" chat.
+
+
+STEP 5 - GROUPS (optional)
+-----------------------------------------------------------------------
+  * Add the bot's number to each WhatsApp group you want covered.
+  * Dashboard > Groups > "Detect my groups" > Register.
+
+
+STEP 6 - PERSONAL NUMBER MODE (only if the bot IS your own number)
+-----------------------------------------------------------------------
+  Dashboard > Settings > tick "Personal number mode" > Save.
+  Your own digest arrives in WhatsApp's "Message Yourself" chat.
+
+
+STEP 7 - REHEARSE, THEN GO LIVE
+-----------------------------------------------------------------------
+  * Health > "Run digests now" > read the message log (dry-run).
+  * Happy? Settings > untick Dry-run > Save.
+  * Health > "Run digests now" - messages now reach phones.
+  * From your phone: /mytasks, then /add Test task today,
+    reply y, then: 1 done  -> expect the thumbs-up reaction.
+
+
+STEP 8 - KEEP IT ALIVE
+-----------------------------------------------------------------------
+  macOS  : System Settings > keep awake when plugged in, or:
+             sudo pmset -c sleep 0
+  Windows: Power settings > never sleep when plugged in.
+  Both   : Docker Desktop set to start at login (Step 0).
+  Digests missed by less than 6 hours are sent when the machine wakes.
+
+
+EVERYDAY COMMANDS
+-----------------------------------------------------------------------
+  Health check     : docker compose ps
+  Logs             : docker compose logs app --tail 50
+  Restart gateway  : docker compose up -d --force-recreate waha
+  Password reset   : docker compose exec app python -m app.cli reset-password
+  Upgrade          : git pull && docker compose up -d --build
+                     (details: docs/UPGRADE.md)
+  Backups          : automatic nightly to ./backups (14 kept)
+                     restore recipe: docs/BACKUP.md
+
+
+UNINSTALL
+-----------------------------------------------------------------------
+    docker compose down          # stop everything
+    # keep ./data and ./backups if you may return; otherwise
+    # delete the whole taskwa folder. On the bot phone, remove the
+    # linked device: WhatsApp > Settings > Linked devices.
+
+=======================================================================
+ Something failed? docs/TROUBLESHOOTING.md has the known issues,
+ including the Apple Silicon image fix and QR/session recovery.
+=======================================================================

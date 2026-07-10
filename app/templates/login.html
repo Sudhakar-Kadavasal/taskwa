@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Log in</title>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<div class="auth-box card">
+  <div class="brand">TaskWa</div>
+  {% if error %}<div class="banner bad">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label>Admin password</label>
+    <input type="password" name="password" autofocus required>
+    <br><br><button style="width:100%">Log in</button>
+  </form>
+  <form method="post" action="/forgot" style="margin-top:12px; text-align:center">
+    <button class="ghost" style="width:100%">Forgot password — send code to admin WhatsApp</button>
+  </form>
+</div>
+</body></html>

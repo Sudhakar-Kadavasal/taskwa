@@ -1,0 +1,59 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATA_DIR=/data
+      - BACKUP_DIR=/backups
+      - WAHA_URL=http://waha:3000
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    ports:
+      - "127.0.0.1:3000:8000"     # dashboard: http://localhost:3000
+    depends_on:
+      - waha
+
+  waha:
+    image: devlikeapro/waha:${WAHA_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - WHATSAPP_HOOK_URL=http://app:8000/webhook?token=${WEBHOOK_SECRET}
+      - WHATSAPP_HOOK_EVENTS=message.any
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - WAHA_PRINT_QR=false
+    volumes:
+      - ./data/waha:/app/.sessions
+    ports:
+      - "127.0.0.1:3001:3000"     # WAHA API (local only; handy for finding group IDs)
+
+  # --- optional: automatic HTTPS on a VPS ---------------------------------
+  # Enable with:  docker compose --profile caddy up -d
+  caddy:
+    image: caddy:2
+    profiles: ["caddy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    depends_on:
+      - app
+
+  # --- optional: local LLM for v2 AI parsing (not used by v1) --------------
+  # Enable with:  docker compose --profile ollama up -d
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
+volumes:
+  caddy_data:
+  ollama_models:

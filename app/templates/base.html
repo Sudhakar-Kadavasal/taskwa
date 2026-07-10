@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TaskWa{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">TaskWa</span>
+  <nav>
+    <a href="/">Tasks</a>
+    <a href="/members">Members</a>
+    <a href="/groups">Groups</a>
+    <a href="/settings">Settings</a>
+    <a href="/health">Health</a>
+    <a href="/logout">Log out</a>
+  </nav>
+</header>
+<main>
+  {% if gateway_status is defined and gateway_status != 'WORKING' %}
+    <div class="banner bad">Gateway session is {{ gateway_status or 'UNKNOWN' }} —
+      reminders are NOT being delivered. <a href="/health">Fix on the Health page</a>.</div>
+  {% endif %}
+  {% if dry_run is defined and dry_run %}
+    <div class="banner warn">Dry-run mode is ON — messages are logged, not sent.
+      Turn it off in <a href="/settings">Settings</a> when you're ready to go live.</div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
