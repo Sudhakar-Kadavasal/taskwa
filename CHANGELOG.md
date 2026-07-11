@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.0 — 2026-07-11
+
+- **Import members from a group**: Members page can now pull any registered
+  group's participant list from the gateway — tick the teammates, edit their
+  names (mentions match on these), pick roles, import. Deduplicates against
+  existing members; anonymous-ID participants are resolved to real numbers
+  where WhatsApp allows; hidden numbers are flagged with the fix (save as
+  contact or make the bot a group admin). Importing never messages anyone.
+
 ## v1.4.0 — 2026-07-11
 
 - Brand finalised as **TaskWA**; official Mint Ledger document set and flyer

@@ -168,6 +168,61 @@ def list_groups() -> list[dict]:
     return []
 
 
+def group_participants(chat_id: str) -> list[dict]:
+    """Participants of a group, best-effort across WAHA versions:
+    [{'phone': digits or '', 'lid': str, 'name': str, 'resolved': bool}]"""
+    items = None
+    try:
+        with httpx.Client(base_url=env.waha_url, headers=_headers(),
+                          timeout=120) as c:
+            r = c.get(f"/api/{env.waha_session}/groups/{chat_id}/participants")
+            if r.status_code < 300 and isinstance(r.json(), list):
+                items = r.json()
+            else:
+                r = c.get(f"/api/{env.waha_session}/groups/{chat_id}")
+                g = r.json() if r.status_code < 300 else {}
+                items = (g.get("participants")
+                         or (g.get("groupMetadata") or {}).get("participants")
+                         or [])
+    except Exception as e:
+        log.warning("participants fetch failed for %s: %s", chat_id, e)
+        return []
+
+    out = []
+    for pt in items or []:
+        pid = pt.get("id") if isinstance(pt, dict) else pt
+        if isinstance(pid, dict):
+            pid = pid.get("_serialized") or ""
+        pid = str(pid or "")
+        user = pid.split("@")[0]
+        phone, lid = "", ""
+        if pid.endswith("@lid"):
+            lid = user
+            phone = lid_to_phone(user) or ""
+        elif pid.endswith("@c.us"):
+            phone = "".join(ch for ch in user if ch.isdigit())
+        else:
+            continue
+        out.append({"phone": phone, "lid": lid, "name": "",
+                    "resolved": bool(phone)})
+
+    # names, best-effort (contact name, else the person's own pushname)
+    try:
+        with _client() as c:
+            for pt in out[:60]:
+                if not pt["phone"]:
+                    continue
+                r = c.get("/api/contacts",
+                          params={"contactId": f"{pt['phone']}@c.us",
+                                  "session": env.waha_session})
+                if r.status_code < 300 and isinstance(r.json(), dict):
+                    d = r.json()
+                    pt["name"] = str(d.get("name") or d.get("pushname") or "")
+    except Exception as e:
+        log.info("participant name lookup skipped: %s", e)
+    return out
+
+
 # ---------------- outbound ----------------
 def _hourly_count(s) -> int:
     cutoff = datetime.utcnow() - timedelta(hours=1)

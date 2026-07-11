@@ -132,3 +132,22 @@ def resolve_ref(s, member: Member, num: int,
         if t:
             return t
     return s.get(Task, num)
+
+
+def bulk_add_members(s, rows) -> tuple[int, int]:
+    """Add many members at once. rows: [{'name','phone','role'}].
+    Skips numbers already registered (any status), blanks, and duplicates
+    within the batch. Returns (added, skipped)."""
+    existing = {m.phone for m in s.query(Member).all()}
+    added = skipped = 0
+    for r in rows:
+        phone = "".join(ch for ch in str(r.get("phone", "")) if ch.isdigit())
+        name = str(r.get("name", "")).strip() or phone
+        role = r.get("role") if r.get("role") in ("admin", "member") else "member"
+        if not phone or phone in existing:
+            skipped += 1
+            continue
+        s.add(Member(name=name[:80], phone=phone, role=role))
+        existing.add(phone)
+        added += 1
+    return added, skipped

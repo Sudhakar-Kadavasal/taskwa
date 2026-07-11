@@ -72,3 +72,33 @@ def test_latest_due_slot():
     assert (s.hour, s.minute) == (9, 30)
     # no times -> None
     assert latest_due_slot(now, []) is None
+
+
+# ---------------- bulk member import (v1.5.0) ----------------
+from app.engine import bulk_add_members
+
+
+def test_bulk_add_members_dedupe_and_normalise():
+    s = SessionLocal()
+    try:
+        before = s.query(Member).count()
+        added, skipped = bulk_add_members(s, [
+            {"name": "Ravi", "phone": "+91 98407 67767", "role": "member"},
+            {"name": "", "phone": "971500000111", "role": "admin"},   # name falls back to phone
+            {"name": "Dup", "phone": "9198 40767767", "role": "member"},  # dup of row 1
+            {"name": "Sk", "phone": "971500000001", "role": "member"},    # already exists
+            {"name": "NoPhone", "phone": "", "role": "member"},
+            {"name": "BadRole", "phone": "971500000222", "role": "root"}, # role coerced
+        ])
+        s.flush()
+        assert added == 3 and skipped == 3
+        m = (s.query(Member)
+              .filter(Member.phone == "919840767767").first())
+        assert m and m.name == "Ravi"
+        m2 = s.query(Member).filter(Member.phone == "971500000111").first()
+        assert m2.name == "971500000111" and m2.role == "admin"
+        m3 = s.query(Member).filter(Member.phone == "971500000222").first()
+        assert m3.role == "member"
+        s.rollback()
+    finally:
+        s.close()

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Import members{% endblock %}
+{% block content %}
+<h1>Import members from a group</h1>
+
+<div class="card">
+  <form method="get" action="/members/import" class="grid">
+    <div><label>Group</label>
+      <select name="group_id" onchange="this.form.submit()">
+        <option value="0">choose a group…</option>
+        {% for g in groups %}
+        <option value="{{ g.id }}" {% if group and g.id==group.id %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select></div>
+  </form>
+  {% if not groups %}
+  <p class="muted">No registered groups yet — register one on the
+     <a href="/groups">Groups page</a> first (the bot can only see members of
+     groups it belongs to).</p>
+  {% endif %}
+</div>
+
+{% if group %}
+  {% if parts %}
+  <div class="card">
+    <p class="muted">Participants of <b>{{ group.name }}</b>. Tick the people
+       who belong on the team, fix their names (mentions like
+       <code>@Ravi</code> match on these), then import. Nobody is messaged —
+       importing only registers them.</p>
+    <form method="post" action="/members/import">
+      <table>
+        <tr><th></th><th>Name (editable)</th><th>WhatsApp number</th><th>Role</th><th></th></tr>
+        {% for p in parts %}
+        <tr>
+          {% if p.phone == me_phone %}
+          <td></td>
+          <td>{{ p.name or 'this bot' }}</td>
+          <td><code>{{ p.phone }}</code></td>
+          <td colspan="2" class="muted">the bot's own number</td>
+          {% elif p.phone and p.phone in existing %}
+          <td></td>
+          <td>{{ p.name }}</td>
+          <td><code>{{ p.phone }}</code></td>
+          <td colspan="2"><span class="badge b-done">already a member</span></td>
+          {% elif p.resolved %}
+          <td><input type="checkbox" name="sel_{{ loop.index }}" style="width:auto"></td>
+          <td><input name="name_{{ loop.index }}" value="{{ p.name }}"
+                     placeholder="name for mentions"></td>
+          <td><code>{{ p.phone }}</code>
+              <input type="hidden" name="phone_{{ loop.index }}" value="{{ p.phone }}"></td>
+          <td><select name="role_{{ loop.index }}">
+                <option>member</option><option>admin</option></select></td>
+          <td></td>
+          {% else %}
+          <td></td>
+          <td class="muted">{{ p.name or 'unknown' }}</td>
+          <td class="muted">number hidden by WhatsApp</td>
+          <td colspan="2" class="muted">save them as a contact, or make the
+              bot a group admin, then retry</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </table>
+      <br><button>Import selected</button>
+      <a href="/members"><button type="button" class="ghost">Cancel</button></a>
+    </form>
+  </div>
+  {% else %}
+  <div class="banner bad">No participants returned. Check that the gateway
+     session is WORKING (Health page) and that the bot is still in
+     “{{ group.name }}”. Newly joined groups can take a minute — retry once.</div>
+  {% endif %}
+{% endif %}
+{% endblock %}

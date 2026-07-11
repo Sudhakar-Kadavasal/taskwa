@@ -2,6 +2,9 @@
 {% block title %}Members{% endblock %}
 {% block content %}
 <h1>Team members</h1>
+{% if imported is defined and imported >= 0 %}
+<div class="banner ok">Imported {{ imported }} member{{ '' if imported == 1 else 's' }}{% if skipped %} · {{ skipped }} skipped (already registered or no number){% endif %}.</div>
+{% endif %}
 <div class="card">
   <table>
     <tr><th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th></th></tr>
@@ -18,7 +21,20 @@
   </table>
 </div>
 <div class="card">
-  <h2 style="margin-top:0">Add member</h2>
+  <h2 style="margin-top:0">Import from a WhatsApp group</h2>
+  <p class="muted">Pull the participant list of any registered group and tick
+     the people to register — no copy-pasting numbers.</p>
+  <form method="get" action="/members/import" class="inline-form">
+    <select name="group_id" style="width:auto; min-width:220px">
+      {% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+    </select>
+    <button class="ghost">Load participants</button>
+  </form>
+  {% if not groups %}<p class="muted">Register a group first on the
+     <a href="/groups">Groups page</a>.</p>{% endif %}
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Add member manually</h2>
   <form method="post" action="/members/add">
     <div class="grid">
       <div><label>Name</label><input name="name" required></div>

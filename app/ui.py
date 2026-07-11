@@ -11,7 +11,8 @@ import os
 
 from . import security, waha
 from .db import get_setting, session_scope, set_setting
-from .engine import change_status, create_task, sort_tasks
+from .engine import (bulk_add_members, change_status, create_task,
+                     sort_tasks)
 from .models import (Group, Member, MessageLog, StatusEvent, Task,
                      PRIORITIES, STATUSES)
 
@@ -266,13 +267,52 @@ def task_edit(request: Request, task_id: int, title: str = Form(...),
 
 # ---------------- members & groups ----------------
 @router.get("/members", response_class=HTMLResponse)
-def members_page(request: Request):
+def members_page(request: Request, imported: int = -1, skipped: int = 0):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
         members = s.query(Member).order_by(Member.active.desc(), Member.name).all()
-        return templates.TemplateResponse(request, "members.html",
-                                          _ctx(request, s, members=members))
+        groups = s.query(Group).filter(Group.active.is_(True)).all()
+        return templates.TemplateResponse(request, "members.html", _ctx(
+            request, s, members=members, groups=groups,
+            imported=imported, skipped=skipped))
+
+
+@router.get("/members/import", response_class=HTMLResponse)
+def members_import(request: Request, group_id: int = 0):
+    if (r := _guard(request)):
+        return r
+    with session_scope() as s:
+        groups = s.query(Group).filter(Group.active.is_(True)).all()
+        group = s.get(Group, group_id) if group_id else None
+        existing = {m.phone for m in s.query(Member).all()}
+    parts, me_phone = [], ""
+    if group:
+        me = waha.me_chat_id() or ""
+        me_phone = me.split("@")[0]
+        parts = waha.group_participants(group.chat_id)
+    with session_scope() as s:
+        return templates.TemplateResponse(request, "members_import.html", _ctx(
+            request, s, groups=groups, group=group, parts=parts,
+            existing=existing, me_phone=me_phone))
+
+
+@router.post("/members/import")
+async def members_import_post(request: Request):
+    if (r := _guard(request)):
+        return r
+    form = await request.form()
+    rows = []
+    for key in form.keys():
+        if key.startswith("sel_"):
+            i = key[4:]
+            rows.append({"name": form.get(f"name_{i}", ""),
+                         "phone": form.get(f"phone_{i}", ""),
+                         "role": form.get(f"role_{i}", "member")})
+    with session_scope() as s:
+        added, skipped = bulk_add_members(s, rows)
+    return RedirectResponse(f"/members?imported={added}&skipped={skipped}",
+                            status_code=303)
 
 
 @router.post("/members/add")
