@@ -1,4 +1,4 @@
-# TaskWa — task reminders over WhatsApp
+# TaskWA — task reminders over WhatsApp
 
 A self-hosted daily task reminder system for small teams, run entirely over
 WhatsApp. Every morning it DMs each team member one digest of their open tasks.
@@ -120,9 +120,9 @@ personal account. A ban would cost you your own WhatsApp, not a spare SIM.
 | Document | For |
 |---|---|
 | `INSTALL.txt` | Copy-paste installation, every platform |
-| `docs/TaskWa-Installation-Guide.pdf` | Illustrated step-by-step install |
-| `docs/TaskWa-User-Manual.pdf` | Team members (2 pages) + administrators |
-| `docs/TaskWa-Command-Card.pdf` | One-page cheat sheet — pin it in the group |
+| `docs/TaskWA-Installation-Guide.pdf` | Illustrated step-by-step install |
+| `docs/TaskWA-User-Manual.pdf` | Team members (2 pages) + administrators |
+| `docs/TaskWA-Command-Card.pdf` | One-page cheat sheet — pin it in the group |
 | `docs/TROUBLESHOOTING.md` | Known issues and fixes |
 | `docs/UPGRADE.md` · `docs/BACKUP.md` | Upgrades, backups, restore, uninstall |
 | `docs/SECURITY.md` · `docs/VPS.md` | Security model, VPS deployment |

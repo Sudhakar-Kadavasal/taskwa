@@ -84,7 +84,7 @@ def _email_alert(subject: str, body: str):
         return
     try:
         msg = EmailMessage()
-        msg["Subject"] = f"[TaskWa] {subject}"
+        msg["Subject"] = f"[TaskWA] {subject}"
         msg["From"] = env.smtp_from or env.smtp_user
         msg["To"] = env.alert_email
         msg.set_content(body)

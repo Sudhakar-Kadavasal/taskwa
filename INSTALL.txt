@@ -1,7 +1,7 @@
 =======================================================================
- TaskWa - INSTALLATION, step by step
+ TaskWA - INSTALLATION, step by step
  Run each block in order. Companion PDF with pictures:
- docs/TaskWa-Installation-Guide.pdf
+ docs/TaskWA-Installation-Guide.pdf
 =======================================================================
 
 STEP 0 - PREREQUISITES (once)
@@ -98,7 +98,7 @@ STEP 4 - SETUP WIZARD
     5. Send the test message, then Finish.
 
   NOTES:
-  * TaskWa starts in DRY-RUN - messages are logged on the Health
+  * TaskWA starts in DRY-RUN - messages are logged on the Health
     page, not sent. Nothing reaches any phone yet.
   * Using your OWN personal WhatsApp number as the bot? After the
     wizard, go to Settings and tick "Personal number mode" (details

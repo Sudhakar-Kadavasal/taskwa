@@ -1,4 +1,4 @@
-# Upgrading TaskWa
+# Upgrading TaskWA
 
 ## Standard upgrade
 

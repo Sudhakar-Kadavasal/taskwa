@@ -60,7 +60,7 @@ def send_reset_code() -> bool:
     ok = False
     for p in phones:
         ok = send_text(chat_id_for_phone(p),
-                       f"TaskWa password reset code: {code}\n"
+                       f"TaskWA password reset code: {code}\n"
                        "Valid for 10 minutes. Ignore if you didn't request it.") or ok
     return ok
 

@@ -172,7 +172,7 @@ def setup_test():
                                         Member.active.is_(True)).first())
     if admin:
         waha.send_text(waha.chat_id_for_phone(admin.phone),
-                       "Test message from TaskWa. Setup looks good!")
+                       "Test message from TaskWA. Setup looks good!")
     return RedirectResponse("/setup", status_code=303)
 
 

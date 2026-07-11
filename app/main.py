@@ -12,7 +12,7 @@ from .webhook import router as webhook_router
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-app = FastAPI(title="TaskWa", docs_url=None, redoc_url=None)
+app = FastAPI(title="TaskWA", docs_url=None, redoc_url=None)
 
 app.mount("/static", StaticFiles(
     directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
