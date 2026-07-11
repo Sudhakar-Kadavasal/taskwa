@@ -19,7 +19,7 @@ Reply:  1 done  |  1 in progress  |  1 block <reason>
 > **Honest notice:** this project uses an *unofficial* WhatsApp gateway
 > ([WAHA](https://waha.devlike.pro)). **Use a dedicated SIM/number, avoid your
 > personal one**, If you are using your personal, look at the settings and check the box which says "using personal number". The official Meta API is not used because it cannot send to
-> groups and charges per message.
+> groups.
 
 ## What you need
 
