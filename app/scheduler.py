@@ -5,7 +5,7 @@ import os
 import shutil
 import smtplib
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
@@ -148,6 +148,55 @@ def purge_old():
         s.query(MessageLog).filter(MessageLog.created_at < cutoff).delete()
 
 
+def latest_due_slot(now, times):
+    """Most recent scheduled slot at or before `now` (tz-aware). Pure/testable."""
+    candidates = []
+    for t in times:
+        try:
+            hh, mm = t.strip().split(":")
+            for day_off in (0, -1):
+                slot = (now.replace(hour=int(hh), minute=int(mm),
+                                    second=0, microsecond=0)
+                        + timedelta(days=day_off))
+                if slot <= now:
+                    candidates.append(slot)
+        except Exception:
+            continue
+    return max(candidates) if candidates else None
+
+
+def startup_catchup():
+    """Cold-boot catch-up: if the machine was OFF at a scheduled send time and
+    the slot is less than 6 hours old, send the missed digest now. Guarded by
+    last_send, so a digest that already went out is never repeated."""
+    from zoneinfo import ZoneInfo as _ZI
+    with session_scope() as s:
+        tzname = get_setting(s, "timezone") or "UTC"
+        times = get_setting(s, "send_times") or []
+        last = get_setting(s, "last_send") or ""
+        dry_note = get_setting(s, "dry_run")
+    try:
+        tz = _ZI(tzname)
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    slot = latest_due_slot(now, times)
+    if slot is None or now - slot > timedelta(hours=6):
+        return
+    last_dt = None
+    if last:
+        try:
+            last_dt = (datetime.fromisoformat(last)
+                       .replace(tzinfo=timezone.utc).astimezone(tz))
+        except ValueError:
+            pass
+    if last_dt is not None and last_dt >= slot:
+        return  # that slot was already sent before shutdown
+    log.info("startup catch-up: digest slot %s was missed while off - sending "
+             "now (dry_run=%s)", slot.isoformat(), dry_note)
+    send_daily_digests()
+
+
 def start():
     reload_digest_jobs()
     scheduler.add_job(check_gateway_health, "interval", minutes=5,
@@ -157,5 +206,9 @@ def start():
                       id="backup", replace_existing=True)
     scheduler.add_job(purge_old, CronTrigger(hour=3, minute=0),
                       id="purge", replace_existing=True)
+    # cold-boot catch-up, delayed so the WhatsApp gateway is up first
+    scheduler.add_job(startup_catchup, "date",
+                      run_date=datetime.now() + timedelta(seconds=120),
+                      id="catchup", replace_existing=True)
     scheduler.start()
     log.info("scheduler started")

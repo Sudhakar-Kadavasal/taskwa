@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.1 — 2026-07-11
+
+- Cold-boot catch-up: if the machine was fully powered off at a scheduled
+  digest time, the missed digest is sent ~2 minutes after startup, provided
+  the slot is less than 6 hours old. Guarded by the last-send record, so an
+  already-delivered digest is never repeated. (Sleep/wake catch-up within the
+  same window already worked; this extends it to full shutdowns.)
+
 ## v1.3.0 — 2026-07-10
 
 - /add sent inside a registered group now auto-flags the task to post to that

@@ -51,3 +51,24 @@ def test_unregistered_group_blocked():
 def test_deactivated_member_blocked():
     assert send_text("971500000009@c.us", "hi") is False
     assert _log_status("971500000009@c.us") == "blocked"
+
+
+# ---------------- cold-boot catch-up slot logic (v1.3.1) ----------------
+from datetime import datetime, timedelta, timezone as _tz
+from app.scheduler import latest_due_slot
+
+
+def test_latest_due_slot():
+    tz = _tz.utc
+    now = datetime(2026, 7, 11, 10, 0, tzinfo=tz)
+    # 08:00 today is the most recent due slot
+    assert latest_due_slot(now, ["08:00"]).hour == 8
+    assert latest_due_slot(now, ["08:00"]).day == 11
+    # 17:00 hasn't happened today -> yesterday's 17:00
+    s = latest_due_slot(now, ["17:00"])
+    assert s.day == 10 and s.hour == 17
+    # multiple slots -> the latest past one wins
+    s = latest_due_slot(now, ["08:00", "09:30", "17:00"])
+    assert (s.hour, s.minute) == (9, 30)
+    # no times -> None
+    assert latest_due_slot(now, []) is None
