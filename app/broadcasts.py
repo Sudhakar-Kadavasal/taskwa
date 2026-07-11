@@ -22,6 +22,39 @@ BCAST_MAX_GAP = 45
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 CRON_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
+# Shown at the top of the timezone dropdown; the full IANA list follows.
+COMMON_TZS = [
+    "Asia/Dubai", "Asia/Kolkata", "Asia/Riyadh", "Asia/Qatar", "Asia/Bahrain",
+    "Asia/Kuwait", "Asia/Muscat", "Asia/Karachi", "Asia/Dhaka", "Asia/Colombo",
+    "Asia/Singapore", "Asia/Hong_Kong", "Asia/Bangkok", "Asia/Jakarta",
+    "Asia/Manila", "Asia/Tokyo", "Asia/Shanghai", "Europe/London",
+    "Europe/Paris", "Europe/Berlin", "Europe/Zurich", "Europe/Istanbul",
+    "Europe/Moscow", "Africa/Cairo", "Africa/Nairobi", "Africa/Johannesburg",
+    "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo",
+    "Australia/Perth", "Australia/Sydney", "Pacific/Auckland", "UTC",
+]
+
+
+def valid_tz(name: str) -> bool:
+    """True when `name` is a real IANA timezone."""
+    if not name:
+        return False
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def broadcast_tzname(b: Broadcast, fallback: str) -> str:
+    """The timezone a broadcast runs in: its own pinned tz, else the
+    dashboard setting, else UTC - never silently the container clock."""
+    for cand in ((b.tz or "").strip(), (fallback or "").strip(), "UTC"):
+        if valid_tz(cand):
+            return cand
+    return "UTC"
+
 
 def days_to_cron(days: list[int]) -> str:
     """[0, 2, 4] -> 'mon,wed,fri'. Empty/complete list -> every day ('*')."""
@@ -67,7 +100,7 @@ def send_broadcast(broadcast_id: int):
         b = s.get(Broadcast, broadcast_id)
         if b is None or not b.active:
             return
-        tzname = get_setting(s, "timezone") or "UTC"
+        tzname = broadcast_tzname(b, get_setting(s, "timezone"))
         text = render_message(b.message, tzname)
         targets = recipients_for(s, b)
         name = b.name

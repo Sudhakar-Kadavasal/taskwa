@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.6.2 — 2026-07-11
+
+- **Per-broadcast time zone**: each broadcast now has its own timezone
+  dropdown next to the send time (common zones first, full IANA list below),
+  defaulting to the dashboard timezone and **pinned at save time** — changing
+  the dashboard timezone later never silently moves an existing broadcast.
+  {date}/{day} placeholders render in the broadcast's own zone. Existing
+  broadcasts are stamped with the dashboard timezone on first startup.
+- **Fix**: saving the Settings page reloaded only digest jobs — broadcast
+  schedules kept the old timezone until a restart. Both now reload.
+- **Fix**: an invalid timezone no longer silently falls back to the container
+  clock (UTC); resolution is broadcast tz → dashboard tz → explicit UTC,
+  with a logged error for bad schedules.
+
 ## v1.6.1 — 2026-07-11
 
 - Unattended operation: one-command autostart installers for macOS

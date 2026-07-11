@@ -148,6 +148,8 @@ class Broadcast(Base):
     group_ids = Column(Text, default="[]")    # JSON list of group ids
     days = Column(Text, default="[]")         # JSON list of ints, 0=Mon .. 6=Sun
     send_time = Column(String(5), default="") # "HH:MM", empty = manual only
+    tz = Column(String(64), default="")       # IANA tz, pinned at save time;
+                                              # "" = legacy row -> stamped at startup
     active = Column(Boolean, default=True)
     last_sent = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

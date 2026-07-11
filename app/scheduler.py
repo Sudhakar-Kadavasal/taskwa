@@ -203,22 +203,19 @@ def reload_broadcast_jobs():
     No cold-boot catch-up on purpose: a missed 'good morning' should be
     skipped, not delivered at 3 PM."""
     import json as _json
-    from .broadcasts import days_to_cron, send_broadcast
+    from .broadcasts import broadcast_tzname, days_to_cron, send_broadcast
     from .models import Broadcast
     for job in scheduler.get_jobs():
         if job.id.startswith(_BCAST_JOB_PREFIX):
             scheduler.remove_job(job.id)
     with session_scope() as s:
-        tzname = get_setting(s, "timezone") or "UTC"
-        rows = [(b.id, b.send_time, b.days) for b in
-                s.query(Broadcast).filter(Broadcast.active.is_(True)).all()
+        fallback = get_setting(s, "timezone") or "UTC"
+        rows = [(b.id, b.send_time, b.days, broadcast_tzname(b, fallback)) for b
+                in s.query(Broadcast).filter(Broadcast.active.is_(True)).all()
                 if b.send_time]
-    try:
-        tz = ZoneInfo(tzname)
-    except Exception:
-        tz = None
-    for bid, t, days_json in rows:
+    for bid, t, days_json, tzname in rows:
         try:
+            tz = ZoneInfo(tzname)   # each broadcast fires in its pinned tz
             hh, mm = t.strip().split(":")
             dow = days_to_cron(_json.loads(days_json or "[]"))
             scheduler.add_job(send_broadcast, CronTrigger(

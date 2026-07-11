@@ -20,13 +20,37 @@ app.include_router(webhook_router)
 app.include_router(ui_router)
 
 
+def _migrate():
+    """Tiny additive migrations for existing SQLite databases.
+    create_all() only creates missing tables - it never adds columns."""
+    from sqlalchemy import text
+    with engine.begin() as c:
+        cols = [r[1] for r in c.execute(text("PRAGMA table_info(broadcasts)"))]
+        if cols and "tz" not in cols:
+            c.execute(text(
+                "ALTER TABLE broadcasts ADD COLUMN tz VARCHAR(64) DEFAULT ''"))
+
+
+def _stamp_broadcast_tz():
+    """Pin the dashboard timezone onto any broadcast that has none, so
+    pre-v1.6.2 rows keep firing at the same wall-clock time forever."""
+    from .models import Broadcast
+    with session_scope() as s:
+        tzname = get_setting(s, "timezone") or "UTC"
+        for b in s.query(Broadcast).filter(
+                (Broadcast.tz.is_(None)) | (Broadcast.tz == "")).all():
+            b.tz = tzname
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(engine)
+    _migrate()
     with session_scope() as s:
         for k, v in DEFAULTS.items():
             if get_setting(s, k) is None:
                 set_setting(s, k, v)
+    _stamp_broadcast_tz()
     from .scheduler import start
     start()
 

@@ -395,7 +395,9 @@ import json as _json
 
 
 def _parse_broadcast_form(form):
+    from .broadcasts import valid_tz
     days = [int(d) for d in form.getlist("days")] if hasattr(form, "getlist") else []
+    tz = str(form.get("tz", "")).strip()
     return dict(
         name=str(form.get("name", "")).strip()[:80] or "Untitled",
         message=str(form.get("message", "")).strip(),
@@ -403,17 +405,23 @@ def _parse_broadcast_form(form):
         group_ids=_json.dumps([int(x) for x in form.getlist("group_ids")]),
         days=_json.dumps(days),
         send_time=str(form.get("send_time", "")).strip(),
+        tz=tz if valid_tz(tz) else "",   # "" is replaced with the setting on save
         active=form.get("active") == "on",
     )
 
 
 def _bcast_ctx(request, s, b=None):
-    from .broadcasts import DAY_NAMES
+    import zoneinfo
+    from .broadcasts import COMMON_TZS, DAY_NAMES
+    tz_default = get_setting(s, "timezone") or "UTC"
+    other_tzs = sorted(zoneinfo.available_timezones() - set(COMMON_TZS))
     return _ctx(request, s,
                 broadcasts=s.query(Broadcast).order_by(Broadcast.name).all(),
                 members=s.query(Member).filter(Member.active.is_(True)).all(),
                 groups_all=s.query(Group).filter(Group.active.is_(True)).all(),
                 day_names=DAY_NAMES, b=b,
+                tz_default=tz_default, common_tzs=COMMON_TZS,
+                other_tzs=other_tzs,
                 b_members=_json.loads(b.member_ids) if b else [],
                 b_groups=_json.loads(b.group_ids) if b else [],
                 b_days=_json.loads(b.days) if b else [])
@@ -438,6 +446,8 @@ async def broadcast_save(request: Request):
     bid = int(form.get("id") or 0)
     data = _parse_broadcast_form(form)
     with session_scope() as s:
+        if not data["tz"]:   # nothing/invalid submitted -> pin today's setting
+            data["tz"] = get_setting(s, "timezone") or "UTC"
         b = s.get(Broadcast, bid) if bid else None
         if b is None:
             b = Broadcast()
@@ -504,8 +514,9 @@ def settings_save(request: Request, timezone: str = Form(...),
         set_setting(s, "purge_after_days", max(1, purge_after_days))
         set_setting(s, "dry_run", dry_run == "on")
         set_setting(s, "personal_mode", personal_mode == "on")
-    from .scheduler import reload_digest_jobs
+    from .scheduler import reload_broadcast_jobs, reload_digest_jobs
     reload_digest_jobs()
+    reload_broadcast_jobs()   # legacy/fallback rows follow the new timezone
     return RedirectResponse("/settings", status_code=303)
 
 

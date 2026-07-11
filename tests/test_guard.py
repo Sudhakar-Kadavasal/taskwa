@@ -141,3 +141,58 @@ def test_recipients_resolution_and_inactive_skipped():
         s.rollback()
     finally:
         s.close()
+
+
+# ---------------- per-broadcast timezone (v1.6.2) ----------------
+from app.broadcasts import broadcast_tzname, valid_tz
+
+
+def test_valid_tz():
+    assert valid_tz("Asia/Dubai")
+    assert valid_tz("UTC")
+    assert not valid_tz("")
+    assert not valid_tz("Not/AZone")
+    assert not valid_tz("Dubai")            # bare city names are not IANA
+
+
+def test_broadcast_tzname_resolution_order():
+    # pinned tz wins over the dashboard setting
+    assert broadcast_tzname(_B(name="x", message="m", tz="Asia/Kolkata"),
+                            "Asia/Dubai") == "Asia/Kolkata"
+    # legacy row (no tz) follows the setting
+    assert broadcast_tzname(_B(name="x", message="m", tz=""),
+                            "Asia/Dubai") == "Asia/Dubai"
+    assert broadcast_tzname(_B(name="x", message="m", tz=None),
+                            "Asia/Dubai") == "Asia/Dubai"
+    # bad pinned tz falls through to the setting, never the container clock
+    assert broadcast_tzname(_B(name="x", message="m", tz="Not/AZone"),
+                            "Asia/Dubai") == "Asia/Dubai"
+    # everything bad -> explicit UTC
+    assert broadcast_tzname(_B(name="x", message="m", tz="Not/AZone"),
+                            "AlsoBad") == "UTC"
+    assert broadcast_tzname(_B(name="x", message="m", tz=""), "") == "UTC"
+
+
+def test_broadcast_tz_stamped_on_startup():
+    from app.main import _stamp_broadcast_tz
+    s = SessionLocal()
+    try:
+        s.add(_B(name="legacy", message="m", tz=""))
+        s.add(_B(name="pinned", message="m", tz="Asia/Kolkata"))
+        s.commit()
+    finally:
+        s.close()
+    with session_scope() as s2:
+        set_setting(s2, "timezone", "Asia/Dubai")
+    _stamp_broadcast_tz()
+    s = SessionLocal()
+    try:
+        legacy = s.query(_B).filter(_B.name == "legacy").first()
+        pinned = s.query(_B).filter(_B.name == "pinned").first()
+        assert legacy.tz == "Asia/Dubai"      # stamped
+        assert pinned.tz == "Asia/Kolkata"    # untouched
+        s.query(_B).filter(_B.name.in_(["legacy", "pinned"])).delete(
+            synchronize_session=False)
+        s.commit()
+    finally:
+        s.close()

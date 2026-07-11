@@ -20,7 +20,7 @@
       <td><b>{{ bc.name }}</b></td>
       <td>
         {% if bc.send_time %}
-          {{ bc.send_time }} ·
+          {{ bc.send_time }} <span class="muted">({{ bc.tz or tz_default }})</span> ·
           {% set d = bc.days | fromjson %}
           {% if not d or d|length == 7 %}every day
           {% else %}{% for i in d %}{{ day_names[i] }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
@@ -59,6 +59,22 @@
         <input name="name" value="{{ b.name if b else '' }}" required></div>
       <div><label>Send time (24h) — leave empty for manual-only</label>
         <input type="time" name="send_time" value="{{ b.send_time if b else '' }}"></div>
+      <div><label>Time zone (pinned to this broadcast)</label>
+        {% set sel = (b.tz if b and b.tz else tz_default) %}
+        <select name="tz">
+          <optgroup label="Common">
+            {% for z in common_tzs %}
+            <option value="{{ z }}" {% if z == sel %}selected{% endif %}>{{ z }}</option>
+            {% endfor %}
+          </optgroup>
+          <optgroup label="All time zones">
+            {% for z in other_tzs %}
+            <option value="{{ z }}" {% if z == sel %}selected{% endif %}>{{ z }}</option>
+            {% endfor %}
+          </optgroup>
+        </select>
+        <p class="muted">Saved with the broadcast — changing the dashboard
+           timezone later never moves this schedule.</p></div>
     </div>
     <label>Days (none ticked = every day, when a time is set)</label>
     <div>
