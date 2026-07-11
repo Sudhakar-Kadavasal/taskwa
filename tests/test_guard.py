@@ -143,6 +143,31 @@ def test_recipients_resolution_and_inactive_skipped():
         s.close()
 
 
+# ---------------- lid-addressed DMs (v1.6.3) ----------------
+def test_lid_recipient_resolves_to_registered_member():
+    """A DM reply to a …@lid chat must be rewritten to phone@c.us and pass
+    the allowlist when the lid maps to a registered member."""
+    from app import waha
+    waha._lid_cache["249902722478108"] = "971500000001"   # registered (Sk)
+    assert waha.canonical_chat_id("249902722478108@lid") == "971500000001@c.us"
+    assert send_text("249902722478108@lid", "hello")      # dry-run logged
+    assert _log_status("971500000001@c.us") == "dryrun"
+
+
+def test_lid_recipient_unregistered_still_blocked():
+    """A lid that resolves to a stranger - or does not resolve at all -
+    must still be refused by the allowlist."""
+    from app import waha
+    waha._lid_cache["111222333444555"] = "971509999999"   # not a member
+    assert not send_text("111222333444555@lid", "nope")
+    assert _log_status("971509999999@c.us") == "blocked"
+    # unresolvable lid: passes through unchanged, refused as-is
+    waha._lid_cache["666777888999000"] = None
+    assert waha.canonical_chat_id("666777888999000@lid") == "666777888999000@lid"
+    assert not send_text("666777888999000@lid", "nope")
+    assert _log_status("666777888999000@lid") == "blocked"
+
+
 # ---------------- per-broadcast timezone (v1.6.2) ----------------
 from app.broadcasts import broadcast_tzname, valid_tz
 

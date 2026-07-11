@@ -42,8 +42,11 @@ def create_task(s, *, title, assignee: Member, creator: Member | None = None,
 
 
 def can_change_status(task: Task, actor: Member) -> bool:
-    """D6: only the assignee or an admin may change status."""
-    return actor.role == "admin" or actor.id == task.assignee_id
+    """D6: only the assignee or an admin may change status - plus the person
+    a blocked task is waiting on, who may release (only) the block."""
+    if actor.role == "admin" or actor.id == task.assignee_id:
+        return True
+    return task.status == "blocked" and actor.id == task.waiting_on_id
 
 
 def change_status(s, task: Task, actor: Member | None, new_status: str,
@@ -58,12 +61,21 @@ def change_status(s, task: Task, actor: Member | None, new_status: str,
     if actor is not None and not can_change_status(task, actor):
         raise PermissionError_(
             f"Only {task.assignee.name} (the assignee) or an admin can update task #{task.id}.")
+    if (actor is not None and actor.role != "admin"
+            and actor.id != task.assignee_id
+            and new_status not in ("in_progress", "open")):
+        # the waiting-on person may release the block, nothing more
+        raise PermissionError_(
+            f"You can unblock task #{task.id}, but only "
+            f"{task.assignee.name} (the assignee) or an admin can "
+            "close or cancel it.")
     old = task.status
     task.status = new_status
     if new_status == "blocked":
         task.blocker_reason = note
     if old == "blocked" and new_status != "blocked":
         task.blocker_reason = ""
+        task.waiting_on_id = None
     task.completed_at = datetime.utcnow() if new_status == "done" else None
     s.add(StatusEvent(task_id=task.id, actor_id=actor.id if actor else None,
                       from_status=old, to_status=new_status, note=note,

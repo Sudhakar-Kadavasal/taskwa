@@ -29,6 +29,10 @@ def _migrate():
         if cols and "tz" not in cols:
             c.execute(text(
                 "ALTER TABLE broadcasts ADD COLUMN tz VARCHAR(64) DEFAULT ''"))
+        cols = [r[1] for r in c.execute(text("PRAGMA table_info(tasks)"))]
+        if cols and "waiting_on_id" not in cols:
+            c.execute(text(
+                "ALTER TABLE tasks ADD COLUMN waiting_on_id INTEGER"))
 
 
 def _stamp_broadcast_tz():

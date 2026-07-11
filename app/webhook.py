@@ -52,13 +52,18 @@ async def webhook(request: Request, background: BackgroundTasks):
     log.info("webhook: chat=%s fromMe=%s group=%s sender=%s body=%r",
              chat, bool(payload.get("fromMe")), is_group, sender_addr, body[:40])
 
-    # Newer WhatsApp accounts appear in groups as anonymous Linked IDs
-    # (…@lid) instead of phone numbers - resolve via the gateway.
+    # Newer WhatsApp accounts appear as anonymous Linked IDs (…@lid)
+    # instead of phone numbers - in groups AND in direct chats. Resolve
+    # via the gateway.
     if sender_addr.endswith("@lid") and not payload.get("fromMe"):
         mapped = lid_to_phone(sender_addr)
         if mapped:
             phone = mapped
             log.info("lid %s resolved to %s", sender_addr, phone)
+            if not is_group and chat.endswith("@lid"):
+                # DM from a lid-addressed account: reply to the canonical
+                # phone@c.us, or the allowlist (rightly) refuses the send.
+                chat = f"{phone}@c.us"
         else:
             log.warning("unresolved lid %s - warming group mapping for next time",
                         sender_addr)
@@ -136,6 +141,10 @@ async def webhook(request: Request, background: BackgroundTasks):
         background.add_task(send_text, chat, "Noted.")
     if reply.text and not suppress_text:
         background.add_task(send_text, chat, reply.text)
+    for cid, txt in reply.extra_sends:   # e.g. assignee/waiting-on notice
+        background.add_task(send_text, cid, txt)
     if reply.alert_admin:
-        background.add_task(alert_admins, reply.alert_admin)
+        # an admin already getting a specific notice is not alerted twice
+        background.add_task(alert_admins, reply.alert_admin,
+                            {cid for cid, _ in reply.extra_sends})
     return {"ok": True}

@@ -36,12 +36,26 @@ def build_member_digest(member: Member, ordered: list[Task]) -> str:
              f"{n} open task{'s' if n != 1 else ''} today:", ""]
     for i, t in enumerate(ordered, 1):
         if t.status == "blocked":
+            w = f", waiting on {t.waiting_on.name}" if t.waiting_on else ""
             lines.append(f"  [!] {i}. {t.title} - BLOCKED "
-                         f"{t.blocked_days}d: {t.blocker_reason}")
+                         f"{t.blocked_days}d{w}: {t.blocker_reason}")
         else:
             lines.append(_line(t, i))
     lines += ["", "Reply:  1 done  |  1 in progress  |  1 block <reason>"]
     return "\n".join(lines)
+
+
+def waiting_on_section(tasks: list[Task]) -> list[str]:
+    """Lines nudging a member about blocks that wait on THEM (serials only,
+    so the numbers never collide with their own digest numbers)."""
+    if not tasks:
+        return []
+    lines = ["", "Waiting on you:"]
+    for t in tasks:
+        lines.append(f"  #{t.id} {t.title} ({t.assignee.name}): "
+                     f"{t.blocker_reason}")
+    lines.append(f"Reply:  {tasks[0].id} unblock  - when your part is done")
+    return lines
 
 
 def build_group_digest(group: Group, ordered: list[Task]) -> str:
@@ -49,8 +63,9 @@ def build_group_digest(group: Group, ordered: list[Task]) -> str:
     for i, t in enumerate(ordered, 1):
         who = t.assignee.name
         if t.status == "blocked":
+            w = f", waiting on {t.waiting_on.name}" if t.waiting_on else ""
             lines.append(f"  [!] {i}. {t.title} ({who}) - BLOCKED "
-                         f"{t.blocked_days}d: {t.blocker_reason}")
+                         f"{t.blocked_days}d{w}: {t.blocker_reason}")
         else:
             lines.append(_line(t, i) + f"  ({who})")
     lines += ["", "Reply:  1 done  |  1 in progress  |  1 block <reason>"]
@@ -69,11 +84,22 @@ def send_daily_digests():
             # tasks announced in a group are not repeated in the personal DM
             tasks = [t for t in tasks
                      if t.post_to_group_id not in active_group_ids]
-            if tasks:
+            # blocks waiting on this member (group-posted ones appear in the
+            # group digest instead - never both)
+            owed = (s.query(Task)
+                     .filter(Task.waiting_on_id == m.id,
+                             Task.status == "blocked")
+                     .all())
+            owed = [t for t in owed
+                    if t.post_to_group_id not in active_group_ids]
+            if tasks or owed:
                 ordered = ordered_for_digest(tasks)
                 save_digest_refs(s, m, ordered)
-                messages.append((chat_id_for_phone(m.phone),
-                                 build_member_digest(m, ordered)))
+                text = (build_member_digest(m, ordered) if ordered else
+                        f"Good morning, {m.name}:")
+                if owed:
+                    text += "\n" + "\n".join(waiting_on_section(owed))
+                messages.append((chat_id_for_phone(m.phone), text))
         for g in groups:
             gtasks = (s.query(Task)
                        .filter(Task.post_to_group_id == g.id,
@@ -89,10 +115,14 @@ def send_daily_digests():
         set_setting(s, "last_send", datetime.utcnow().isoformat(timespec="seconds"))
 
 
-def alert_admins(text: str):
-    """Send an immediate alert to every active admin (used for blockers)."""
+def alert_admins(text: str, exclude: set | None = None):
+    """Send an immediate alert to every active admin (used for blockers).
+    exclude: chat ids already receiving a more specific message about the
+    same event - an admin never gets told twice."""
+    exclude = exclude or set()
     with session_scope() as s:
         admins = (s.query(Member)
                    .filter(Member.role == "admin", Member.active.is_(True)).all())
-        targets = [(chat_id_for_phone(a.phone), text) for a in admins]
+        targets = [(chat_id_for_phone(a.phone), text) for a in admins
+                   if chat_id_for_phone(a.phone) not in exclude]
     paced_send(targets)

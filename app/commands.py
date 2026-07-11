@@ -20,13 +20,15 @@ from datetime import date, datetime, timedelta
 from .engine import (InvalidTransition, PermissionError_, change_status,
                      create_task, open_tasks_for, resolve_ref,
                      save_digest_refs, sort_tasks)
-from .models import Member, PendingConfirm, Task
+from .models import Member, PendingConfirm, StatusEvent, Task
 
 HELP_TEXT = (
     "*Task bot - commands*\n"
     "1 done - close task 1 (your digest number)\n"
     "1 in progress - mark started\n"
     "1 block <reason> - report a blocker (alerts admin)\n"
+    "1 block waiting on @Name - hand the block to that person\n"
+    "1 unblock - release a block that waits on you\n"
     "1 reopen - undo a mistaken 'done'\n"
     "Just 'done' works if you have a single open task,\n"
     "or swipe-reply on a task message and type 'done'.\n"
@@ -36,7 +38,7 @@ HELP_TEXT = (
     "/help - this message"
 )
 
-VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?)"
+VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock)"
 RE_STATUS = re.compile(rf"^\s*#?(\d+)[.):]?\s+{VERB}\b\s*(.*)$",
                        re.IGNORECASE | re.DOTALL)
 RE_BARE = re.compile(rf"^\s*{VERB}\b\s*(.*)$", re.IGNORECASE | re.DOTALL)
@@ -79,13 +81,138 @@ class Reply:
     """What the webhook should do after handling a message.
 
     unmatched=True marks ordinary conversation - the webhook suppresses these
-    replies in groups and in personal-number mode."""
+    replies in groups and in personal-number mode.
+    extra_sends: additional (chat_id, text) messages to other recipients
+    (e.g. notifying an assignee) - each still vetted by the send allowlist."""
     def __init__(self, text: str | None = None, react: bool = False,
-                 alert_admin: str | None = None, unmatched: bool = False):
+                 alert_admin: str | None = None, unmatched: bool = False,
+                 extra_sends: list | None = None):
         self.text = text
         self.react = react
         self.alert_admin = alert_admin
         self.unmatched = unmatched
+        self.extra_sends = extra_sends or []
+
+
+def _serial_footer(serial: int) -> str:
+    """Reply instructions using the task's global serial (always resolvable)."""
+    return (f"Reply:  {serial} done  |  {serial} in progress  |  "
+            f"{serial} block <reason>")
+
+
+def notify_assignee(s, t: Task, creator: Member | None):
+    """Immediate DM for a task created for someone else. Returns
+    (chat_id, text) to send, or None (self-assigned, group-posted, or
+    inactive assignee). Adds a Y/N acceptance dialogue unless the assignee
+    already has another confirmation in flight."""
+    from .waha import chat_id_for_phone
+    assignee = t.assignee
+    if assignee is None or not assignee.active or t.post_to_group_id:
+        return None
+    if creator is not None and assignee.id == creator.id:
+        return None
+    due = f", due {t.due_date:%a %d %b}" if t.due_date else ""
+    pr = " [HIGH]" if t.priority == "high" else ""
+    who = creator.name if creator else "the dashboard"
+    lines = [f"New task from {who}: {t.title}{due}{pr}"]
+    has_pending = (s.query(PendingConfirm)
+                    .filter(PendingConfirm.member_id == assignee.id,
+                            PendingConfirm.expires_at > datetime.utcnow())
+                    .count() > 0)
+    if not has_pending:
+        s.add(PendingConfirm(
+            member_id=assignee.id,
+            draft_json=json.dumps({"kind": "accept", "task_id": t.id}),
+            expires_at=datetime.utcnow() + timedelta(hours=24)))
+        s.flush()
+        lines += ["", "Reply Y to accept, N to decline."]
+    lines += ["", _serial_footer(t.id)]
+    return chat_id_for_phone(assignee.phone), "\n".join(lines)
+
+
+def _task_channel(s, t: Task) -> str:
+    """Where updates about this task are announced: its group when
+    group-posted, otherwise the assignee's DM - one channel, never both."""
+    from .waha import chat_id_for_phone
+    if t.post_to_group_id and t.group and t.group.active:
+        return t.group.chat_id
+    return chat_id_for_phone(t.assignee.phone)
+
+
+def _waiting_notice(s, t: Task, sender: Member,
+                    waited: Member) -> tuple[str, str]:
+    """The one message telling someone a task is now waiting on them -
+    posted in the task's group if it has one, else DM'd."""
+    from .waha import chat_id_for_phone
+    txt = (f"{waited.name} - {sender.name} is waiting on you for task "
+           f"#{t.id}: {t.title}\nReason: {t.blocker_reason}\n\n"
+           f"Reply:  {t.id} unblock  - when your part is done, or if "
+           "there's no block on your side.")
+    if t.post_to_group_id and t.group and t.group.active:
+        return t.group.chat_id, txt
+    return chat_id_for_phone(waited.phone), txt
+
+
+def _handle_acceptance(s, sender: Member, draft: dict, accepted: bool,
+                       raw: str) -> Reply:
+    """Y/N answer to a 'New task from …' acceptance dialogue. Declining
+    returns the task to the person who created it (or an admin if the
+    creator is gone) - work never dies silently and never stays with
+    someone who refused it."""
+    from .waha import chat_id_for_phone
+    t = s.get(Task, draft.get("task_id"))
+    if t is None or t.status in ("done", "cancelled"):
+        return Reply(text="That task no longer exists or is already closed.")
+    if accepted:
+        s.add(StatusEvent(task_id=t.id, actor_id=sender.id,
+                          from_status=t.status, to_status=t.status,
+                          channel="whatsapp", raw_text=raw,
+                          note="accepted by assignee"))
+        return Reply(text=f"Accepted - task #{t.id} is on your list.\n\n"
+                          + _serial_footer(t.id), react=True)
+    # declined -> back to the initiator
+    owner = t.creator if (t.creator and t.creator.active) else None
+    if owner is None or owner.id == sender.id:
+        owner = (s.query(Member)
+                  .filter(Member.role == "admin", Member.active.is_(True),
+                          Member.id != sender.id).first())
+    if owner is None:   # nobody to return it to - keep it, tell the admins
+        s.add(StatusEvent(task_id=t.id, actor_id=sender.id,
+                          from_status=t.status, to_status=t.status,
+                          channel="whatsapp", raw_text=raw,
+                          note="DECLINED by assignee (no one to return to)"))
+        return Reply(text=f"Noted - you declined task #{t.id}, but there is "
+                          "no one to return it to, so it stays on your list.",
+                     alert_admin=f"{sender.name} DECLINED task #{t.id}: "
+                                 f"{t.title} - no active creator to return "
+                                 "it to.")
+    t.assignee_id = owner.id
+    s.add(StatusEvent(task_id=t.id, actor_id=sender.id,
+                      from_status=t.status, to_status=t.status,
+                      channel="whatsapp", raw_text=raw,
+                      note=f"declined by {sender.name} - returned to "
+                           f"{owner.name}"))
+    txt = (f"{sender.name} declined task #{t.id}: {t.title} - it's back on "
+           f"your list.\n\n" + _serial_footer(t.id))
+    return Reply(text=f"Noted - task #{t.id} goes back to {owner.name}.",
+                 extra_sends=[(chat_id_for_phone(owner.phone), txt)])
+
+
+def _created_reply(s, t: Task, sender: Member, assignee: Member) -> Reply:
+    """Receipt for the creator - always says what happens next, and how to
+    reply (fixes the dead-end 'Created task #N' message)."""
+    base = (f"Created task #{t.id}: {t.title} -> {assignee.name}"
+            + (f", due {t.due_date:%a %d %b}" if t.due_date else ""))
+    if assignee.id == sender.id:
+        return Reply(text=base + "\n\n" + _serial_footer(t.id))
+    if t.post_to_group_id:
+        return Reply(text=base + "\nIt will appear in that group's daily list.")
+    extra = notify_assignee(s, t, sender)
+    if extra:
+        return Reply(text=base + f"\n{assignee.name} has been asked to "
+                                 "accept it.",
+                     extra_sends=[extra])
+    return Reply(text=base)
 
 
 def _find_member_by_ref(s, ref: str) -> Member | None:
@@ -143,11 +270,38 @@ def _apply_verb(s, sender: Member, task: Task, verb: str, rest: str,
             if not rest.strip():
                 return Reply(text="Please include the reason: "
                                   "block <what you're stuck on>")
-            change_status(s, task, sender, "blocked", note=rest.strip(),
+            reason = rest.strip()
+            change_status(s, task, sender, "blocked", note=reason,
                           channel="whatsapp", raw_text=raw)
             alert = (f"[!] Blocker on task #{task.id} '{task.title}'\n"
-                     f"By: {sender.name}\nReason: {rest.strip()}")
-            return Reply(react=True, alert_admin=alert)
+                     f"By: {sender.name}\nReason: {reason}")
+            # "block waiting on @Priya" -> hand the block to that person
+            extra = []
+            mref = re.search(r"@(\w+)", reason)
+            waited = _find_member_by_ref(s, mref.group(1)) if mref else None
+            if waited and waited.active and waited.id != sender.id:
+                task.waiting_on_id = waited.id
+                extra.append(_waiting_notice(s, task, sender, waited))
+                alert += f"\nWaiting on: {waited.name} (they can reply " \
+                         f"'{task.id} unblock')"
+            return Reply(react=True, alert_admin=alert, extra_sends=extra)
+        if verb_norm == "unblock":
+            if task.status != "blocked":
+                return Reply(text=f"Task #{task.id} isn't blocked.")
+            waited_id = task.waiting_on_id
+            change_status(s, task, sender, "in_progress",
+                          note=("unblocked: " + rest.strip()) if rest.strip()
+                               else "unblocked",
+                          channel="whatsapp", raw_text=raw)
+            extra = []
+            if sender.id != task.assignee_id:      # tell the owner it's back
+                note = f" ({rest.strip()})" if rest.strip() else ""
+                txt = (f"{sender.name} cleared the block on task "
+                       f"#{task.id}: {task.title}{note} - back to you, "
+                       f"{task.assignee.name}.\n\n" + _serial_footer(task.id))
+                extra.append((_task_channel(s, task), txt))
+            _ = waited_id   # link cleared inside change_status
+            return Reply(react=True, extra_sends=extra)
     except PermissionError_ as e:
         return Reply(text=str(e))
     except InvalidTransition as e:
@@ -211,15 +365,20 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
     if not body:
         return Reply()
 
-    # ---- pending /add confirmation ----
+    # ---- pending Y/N confirmation (an /add draft, or task acceptance) ----
     pending = (s.query(PendingConfirm)
                 .filter(PendingConfirm.member_id == sender.id).first())
     if pending:
         if pending.expires_at < datetime.utcnow():
             s.delete(pending)
-        elif RE_YES.match(body):
+        elif RE_YES.match(body) or RE_NO.match(body):
             draft = json.loads(pending.draft_json)
             s.delete(pending)
+            accepted = bool(RE_YES.match(body))
+            if draft.get("kind") == "accept":
+                return _handle_acceptance(s, sender, draft, accepted, body)
+            if not accepted:
+                return Reply(text="Cancelled - nothing created.")
             assignee = s.get(Member, draft["assignee_id"])
             t = create_task(
                 s, title=draft["title"], assignee=assignee, creator=sender,
@@ -227,11 +386,7 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
                 due_date=date.fromisoformat(draft["due"]) if draft["due"] else None,
                 post_to_group_id=draft.get("group_id"),
                 channel="whatsapp", raw_text=body)
-            return Reply(text=f"Created task #{t.id}: {t.title} -> {assignee.name}"
-                              + (f", due {t.due_date:%a %d %b}" if t.due_date else ""))
-        elif RE_NO.match(body):
-            s.delete(pending)
-            return Reply(text="Cancelled - nothing created.")
+            return _created_reply(s, t, sender, assignee)
 
     # ---- numbered status update: "1 done", "12. block stuck on X" ----
     m = RE_STATUS.match(body)

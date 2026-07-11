@@ -40,6 +40,7 @@ class Task(Base):
     post_to_group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
     status = Column(String(15), default="open")
     blocker_reason = Column(Text, default="")
+    waiting_on_id = Column(Integer, ForeignKey("members.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -47,6 +48,7 @@ class Task(Base):
     assignee = relationship("Member", foreign_keys=[assignee_id])
     creator = relationship("Member", foreign_keys=[creator_id])
     group = relationship("Group", foreign_keys=[post_to_group_id])
+    waiting_on = relationship("Member", foreign_keys=[waiting_on_id])
 
     @property
     def is_open(self):

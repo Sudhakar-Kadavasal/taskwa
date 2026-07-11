@@ -247,9 +247,22 @@ def _allowed_recipient(s, chat_id: str) -> bool:
     return False
 
 
+def canonical_chat_id(chat_id: str) -> str:
+    """Privacy-enabled WhatsApp accounts appear as anonymous …@lid addresses
+    even in DMs. Rewrite to the member's canonical phone@c.us so the
+    allowlist can vet them; an unresolvable lid passes through unchanged
+    (and is then refused by the allowlist - never sent blind)."""
+    if chat_id.endswith("@lid"):
+        digits = lid_to_phone(chat_id)   # cached: inbound already resolved it
+        if digits:
+            return f"{digits}@c.us"
+    return chat_id
+
+
 def send_text(chat_id: str, text: str) -> bool:
     """Send a message (or log it in dry-run). Returns True on success.
     Refuses any recipient that is not a registered member or group."""
+    chat_id = canonical_chat_id(chat_id)
     with session_scope() as s:
         if not _allowed_recipient(s, chat_id):
             s.add(MessageLog(chat_id=chat_id, text=text, status="blocked",

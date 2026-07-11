@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.6.3 — 2026-07-11
+
+- **Assignees are now notified the moment a task is created for them**
+  (via /add or the dashboard): "New task from Sk: … Reply Y to accept,
+  N to decline", plus reply instructions using the task's serial number.
+  Accepting is recorded in the audit trail; **declining returns the task
+  to the person who created it** (or an admin if the creator is gone) —
+  work never dies silently. The initiator gets one DM; no duplicate admin
+  alert. Group-posted tasks skip the DM (their group's daily digest
+  announces them).
+- **Blocks can now wait on a person**: "3 block waiting on @Priya" hands
+  the block to Priya — she gets one message (in the task's group if it has
+  one, else a DM) with "Reply: 3 unblock — when your part is done, or if
+  there's no block on your side." Her "3 unblock" flips the task back to
+  in-progress and tells the assignee it's back on them. She can release
+  the block but cannot close someone else's task. Digests show "BLOCKED
+  2d, waiting on Priya", and her own digest gains a "Waiting on you"
+  section for non-group tasks (group ones live in the group digest —
+  never both).
+- **Fix: the "Created task #N" receipt was a dead end.** It now ends with
+  "Reply: N done | N in progress | N block <reason>" when you assign to
+  yourself, or tells you the assignee has been asked to accept / that the
+  task will appear in the group's daily list.
+- **Fix: members on privacy-enabled WhatsApp accounts never received
+  replies.** Their DMs arrive from an anonymous …@lid address; inbound
+  commands were understood (v1.5 lid resolution) but the reply went back to
+  the raw @lid id, which the outbound allowlist refused ("blocked" in the
+  message log). Recipient ids are now canonicalised to phone@c.us at the
+  send_text choke point, so registered members get replies regardless of
+  addressing — while lids that resolve to strangers (or don't resolve)
+  remain blocked. /add, Y/N confirms and all commands now work for every
+  registered member, not just those with classic @c.us addressing.
+
 ## v1.6.2 — 2026-07-11
 
 - **Per-broadcast time zone**: each broadcast now has its own timezone

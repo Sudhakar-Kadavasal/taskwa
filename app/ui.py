@@ -227,14 +227,19 @@ def task_create(request: Request, title: str = Form(...),
                 post_to_group_id: str = Form("")):
     if (r := _guard(request)):
         return r
+    notify = None
     with session_scope() as s:
         assignee = s.get(Member, assignee_id)
         admin = s.query(Member).filter(Member.role == "admin").first()
-        create_task(s, title=title, assignee=assignee, creator=admin,
-                    description=description, priority=priority,
-                    due_date=date.fromisoformat(due_date) if due_date else None,
-                    post_to_group_id=int(post_to_group_id) if post_to_group_id else None,
-                    channel="dashboard")
+        t = create_task(s, title=title, assignee=assignee, creator=admin,
+                        description=description, priority=priority,
+                        due_date=date.fromisoformat(due_date) if due_date else None,
+                        post_to_group_id=int(post_to_group_id) if post_to_group_id else None,
+                        channel="dashboard")
+        from .commands import notify_assignee
+        notify = notify_assignee(s, t, admin)
+    if notify:
+        waha.send_text(*notify)
     return RedirectResponse("/", status_code=303)
 
 

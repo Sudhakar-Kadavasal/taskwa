@@ -140,6 +140,123 @@ def test_add_unknown_member(s, team):
     assert "recognise" in r.text
 
 
+# ------- assignee notification + acceptance dialogue (v1.6.3) -------
+def test_created_receipt_has_reply_footer_when_self_assigned(s, team):
+    admin, _, _ = team
+    handle_message(s, admin, "/add Pay the rent", admin)
+    r = handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert f"Reply:  {t.id} done" in r.text          # no more dead-end receipt
+
+
+def test_assignee_notified_with_acceptance_dialogue(s, team):
+    admin, _, priya = team
+    handle_message(s, admin, "/add Send invoice @Priya fri", admin)
+    r = handle_message(s, admin, "y", admin)
+    assert "asked to accept" in r.text               # creator told what happens
+    assert len(r.extra_sends) == 1                   # DM queued for Priya
+    cid, txt = r.extra_sends[0]
+    assert cid == "971500000003@c.us"
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert "New task from Sudhakar" in txt
+    assert "Reply Y to accept" in txt
+    assert f"{t.id} done" in txt                     # serial footer included
+    r2 = handle_message(s, priya, "y", admin)        # Priya accepts
+    assert "Accepted" in r2.text
+    assert s.get(Task, t.id).status == "open"        # accepted != started
+
+
+def test_group_posted_task_skips_assignee_dm(s, team):
+    admin, ravi, _ = team
+    handle_message(s, admin, "/add Fix pump @Ravi", admin,
+                   is_group=True, group_id=1)
+    r = handle_message(s, admin, "y", admin, is_group=True, group_id=1)
+    assert not r.extra_sends                         # group digest covers it
+    assert "daily list" in r.text
+
+
+def test_decline_returns_task_to_creator(s, team):
+    admin, ravi, _ = team
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    r = handle_message(s, ravi, "n", admin)          # Ravi declines
+    assert f"back to {admin.name}" in r.text
+    assert s.get(Task, t.id).assignee_id == admin.id  # returned to initiator
+    assert s.get(Task, t.id).status == "open"         # never cancelled
+    assert len(r.extra_sends) == 1                    # creator gets one DM
+    cid, txt = r.extra_sends[0]
+    assert cid == "971500000001@c.us" and "declined" in txt
+    assert not r.alert_admin                          # no second message
+
+
+# ------- block waiting on @person -> unblock returns it (v1.6.3) -------
+def test_block_waiting_on_person_and_unblock(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team)                                # Ravi's task
+    r = handle_message(s, ravi, f"{t.id} block waiting on @Priya", admin)
+    assert r.react
+    task = s.get(Task, t.id)
+    assert task.status == "blocked"
+    assert task.waiting_on_id == priya.id
+    assert len(r.extra_sends) == 1                    # Priya notified (DM)
+    cid, txt = r.extra_sends[0]
+    assert cid == "971500000003@c.us"
+    assert "waiting on you" in txt and f"{t.id} unblock" in txt
+    assert "Waiting on: Priya" in r.alert_admin
+    # Priya releases it
+    r2 = handle_message(s, priya, f"{t.id} unblock sent the quote", admin)
+    assert r2.react
+    task = s.get(Task, t.id)
+    assert task.status == "in_progress"               # back with Ravi, active
+    assert task.waiting_on_id is None
+    assert task.assignee_id == ravi.id
+    assert len(r2.extra_sends) == 1                   # Ravi told it's back
+    cid2, txt2 = r2.extra_sends[0]
+    assert cid2 == "971500000002@c.us"
+    assert "back to you, Ravi" in txt2 and f"{t.id} done" in txt2
+
+
+def test_waiting_person_cannot_close_the_task(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team)
+    handle_message(s, ravi, f"{t.id} block waiting on @Priya", admin)
+    r = handle_message(s, priya, f"{t.id} done", admin)   # not her call
+    assert r.text and "unblock" in r.text
+    assert s.get(Task, t.id).status == "blocked"
+
+
+def test_unblock_by_uninvolved_member_refused(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team)
+    handle_message(s, ravi, f"{t.id} block waiting on supplier", admin)
+    assert s.get(Task, t.id).waiting_on_id is None    # no @member mentioned
+    r = handle_message(s, priya, f"{t.id} unblock", admin)
+    assert r.text and "admin" in r.text               # permission refused
+    assert s.get(Task, t.id).status == "blocked"
+
+
+def test_unblock_on_unblocked_task(s, team):
+    admin, ravi, _ = team
+    t = _task(s, team)
+    r = handle_message(s, ravi, f"{t.id} unblock", admin)
+    assert "isn't blocked" in r.text
+
+
+def test_digest_shows_waiting_on(s, team):
+    from app.digest import build_member_digest, waiting_on_section
+    admin, ravi, priya = team
+    t = _task(s, team)
+    handle_message(s, ravi, f"{t.id} block waiting on @Priya", admin)
+    s.flush()
+    task = s.get(Task, t.id)
+    text = build_member_digest(ravi, [task])
+    assert "waiting on Priya" in text                 # Ravi sees who owes him
+    lines = waiting_on_section([task])
+    assert any("Buy cement (Ravi)" in ln for ln in lines)
+    assert any(f"{t.id} unblock" in ln for ln in lines)
+
+
 # ---------------- queries ----------------
 def test_mytasks_and_list(s, team):
     admin, ravi, _ = team
