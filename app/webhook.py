@@ -70,67 +70,76 @@ async def webhook(request: Request, background: BackgroundTasks):
             background.add_task(list_groups)
             return {"ok": True}
 
-    with session_scope() as s:
-        personal = bool(get_setting(s, "personal_mode"))
-        ack_mode = get_setting(s, "ack_mode")
+    try:
+        with session_scope() as s:
+            personal = bool(get_setting(s, "personal_mode"))
+            ack_mode = get_setting(s, "ack_mode")
 
-        if payload.get("fromMe"):
-            if not personal:
+            if payload.get("fromMe"):
+                if not personal:
+                    return {"ok": True}
+                # Personal mode: the owner's own messages count as inbound in
+                # the "Message Yourself" chat and in REGISTERED groups
+                # (checked just below). Outgoing messages to any other chat
+                # are the owner's private conversations - never processed.
+                me = me_chat_id()
+                if not me:
+                    log.warning("fromMe dropped: could not resolve own chat id")
+                    return {"ok": True}
+                if chat == me:
+                    phone = me.split("@")[0]
+                    is_group = False
+                elif is_group:
+                    phone = me.split("@")[0]   # owner speaking in a group
+                else:
+                    log.info("fromMe dropped: private chat %s (me=%s)", chat, me)
+                    return {"ok": True}
+
+            # groups: only registered, active groups are listened to at all
+            group_id = None
+            if is_group:
+                g = (s.query(Group)
+                      .filter(Group.chat_id == chat, Group.active.is_(True))
+                      .first())
+                if g is None:
+                    log.info("ignored message in unregistered group %s", chat)
+                    return {"ok": True}
+                group_id = g.id
+
+            # idempotency (FR-20)
+            if msg_id:
+                if s.get(ProcessedMessage, msg_id):
+                    return {"ok": True}
+                s.add(ProcessedMessage(message_id=msg_id))
+
+            sender = member_by_phone(s, phone)
+            if sender is None:
+                log.info("silently ignored message from unregistered %s (group=%s)",
+                         phone, is_group)
                 return {"ok": True}
-            # Personal mode: the owner's own messages count as inbound in the
-            # "Message Yourself" chat and in REGISTERED groups (checked just
-            # below). Outgoing messages to any other chat are the owner's
-            # private conversations - never processed.
-            me = me_chat_id()
-            if not me:
-                log.warning("fromMe dropped: could not resolve own chat id")
-                return {"ok": True}
-            if chat == me:
-                phone = me.split("@")[0]
-                is_group = False
-            elif is_group:
-                phone = me.split("@")[0]   # owner speaking in a group
-            else:
-                log.info("fromMe dropped: private chat %s (me=%s)", chat, me)
+
+            # media / non-text: only hint in a DM on a dedicated bot number
+            if not body.strip():
+                if not is_group and not personal:
+                    background.add_task(
+                        send_text, chat,
+                        "I can only read text messages. Send /help for commands.")
                 return {"ok": True}
 
-        # groups: only registered, active groups are listened to at all
-        group_id = None
-        if is_group:
-            g = (s.query(Group)
-                  .filter(Group.chat_id == chat, Group.active.is_(True))
-                  .first())
-            if g is None:
-                log.info("ignored message in unregistered group %s", chat)
-                return {"ok": True}
-            group_id = g.id
-
-        # idempotency (FR-20)
-        if msg_id:
-            if s.get(ProcessedMessage, msg_id):
-                return {"ok": True}
-            s.add(ProcessedMessage(message_id=msg_id))
-
-        sender = member_by_phone(s, phone)
-        if sender is None:
-            log.info("silently ignored message from unregistered %s (group=%s)",
-                     phone, is_group)
-            return {"ok": True}
-
-        # media / non-text: only hint in a DM on a dedicated bot number
-        if not body.strip():
-            if not is_group and not personal:
-                background.add_task(
-                    send_text, chat,
-                    "I can only read text messages. Send /help for commands.")
-            return {"ok": True}
-
-        admin = (s.query(Member)
-                  .filter(Member.role == "admin", Member.active.is_(True))
-                  .first())
-        reply = handle_message(s, sender, body, admin,
-                               is_group=is_group, quoted=quoted,
-                               group_id=group_id)
+            admin = (s.query(Member)
+                      .filter(Member.role == "admin", Member.active.is_(True))
+                      .first())
+            reply = handle_message(s, sender, body, admin,
+                                   is_group=is_group, quoted=quoted,
+                                   group_id=group_id)
+    except Exception:
+        # NEVER hand the gateway an error: WAHA re-delivers failed webhooks
+        # every few seconds, which turns one bug into a retry storm on a
+        # personal number. Log loudly, acknowledge, move on.
+        log.exception("webhook handler crashed (chat=%s, body=%r) - "
+                      "acknowledged to prevent gateway retries",
+                      chat, body[:60])
+        return {"ok": True}
 
     # Non-command chatter: stay out of the conversation.
     suppress_text = reply.unmatched and (is_group or personal)

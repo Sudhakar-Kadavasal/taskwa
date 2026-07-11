@@ -238,12 +238,41 @@ def run_broadcast_soon(broadcast_id: int):
                       id=f"bcast-now-{broadcast_id}-{datetime.utcnow().timestamp()}")
 
 
+def expire_acceptance_dialogs():
+    """No answer to 'Reply Y to accept, N to decline' within the window
+    counts as ACCEPTED: record it in the audit trail and clear the queue.
+    (Expired /add drafts are untouched - they die lazily as before.)"""
+    import json as _json
+    from .models import PendingConfirm
+    with session_scope() as s:
+        rows = (s.query(PendingConfirm)
+                 .filter(PendingConfirm.expires_at < datetime.utcnow()).all())
+        for p in rows:
+            try:
+                draft = _json.loads(p.draft_json)
+            except ValueError:
+                continue
+            if draft.get("kind") != "accept":
+                continue
+            t = s.get(Task, draft.get("task_id"))
+            if t is not None and t.status not in ("done", "cancelled"):
+                s.add(StatusEvent(
+                    task_id=t.id, actor_id=p.member_id,
+                    from_status=t.status, to_status=t.status,
+                    channel="system",
+                    note="auto-accepted (no reply within 30 min)"))
+                log.info("task #%s auto-accepted (assignee silent 30 min)", t.id)
+            s.delete(p)
+
+
 def start():
     reload_digest_jobs()
     reload_broadcast_jobs()
     scheduler.add_job(check_gateway_health, "interval", minutes=5,
                       id="health", replace_existing=True,
                       next_run_time=datetime.utcnow())
+    scheduler.add_job(expire_acceptance_dialogs, "interval", minutes=5,
+                      id="accept-expiry", replace_existing=True)
     scheduler.add_job(nightly_backup, CronTrigger(hour=2, minute=30),
                       id="backup", replace_existing=True)
     scheduler.add_job(purge_old, CronTrigger(hour=3, minute=0),

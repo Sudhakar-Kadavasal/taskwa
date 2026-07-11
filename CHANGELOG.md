@@ -4,7 +4,16 @@
 
 - **Assignees are now notified the moment a task is created for them**
   (via /add or the dashboard): "New task from Sk: … Reply Y to accept,
-  N to decline", plus reply instructions using the task's serial number.
+  N to decline (no reply in 30 min counts as accepted)", plus reply
+  instructions using the task's serial number. **Silence auto-accepts
+  after 30 minutes** — recorded in the audit trail as "auto-accepted",
+  distinct from an explicit Y.
+- **Hotfix (found in live testing): a stale expired confirmation row
+  crashed task creation** with a UNIQUE-constraint error, rolling back the
+  task and sending nothing — and the crash made the gateway re-deliver the
+  message every few seconds (retry storm). Stale rows are now replaced,
+  and the webhook acknowledges even on internal errors so a bug can never
+  trigger gateway retries again.
   Accepting is recorded in the audit trail; **declining returns the task
   to the person who created it** (or an admin if the creator is gone) —
   work never dies silently. The initiator gets one DM; no duplicate admin

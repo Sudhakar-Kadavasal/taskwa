@@ -175,6 +175,73 @@ def test_group_posted_task_skips_assignee_dm(s, team):
     assert "daily list" in r.text
 
 
+def test_stale_expired_pending_does_not_crash_notification(s, team):
+    """Regression (live 11 Jul): an EXPIRED PendingConfirm left in the table
+    (member_id is UNIQUE) crashed notify_assignee with IntegrityError,
+    rolling back task creation entirely."""
+    from datetime import datetime, timedelta
+    import json as _json
+    from app.models import PendingConfirm
+    admin, ravi, _ = team
+    s.add(PendingConfirm(member_id=ravi.id,                   # stale leftover
+                         draft_json=_json.dumps({"kind": "accept", "task_id": 999}),
+                         expires_at=datetime.utcnow() - timedelta(hours=1)))
+    s.flush()
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)
+    r = handle_message(s, admin, "y", admin)                  # crashed before
+    assert "Created task #" in r.text
+    assert len(r.extra_sends) == 1
+    assert "Reply Y to accept" in r.extra_sends[0][1]
+    pends = s.query(PendingConfirm).filter(
+        PendingConfirm.member_id == ravi.id).all()
+    assert len(pends) == 1                                    # replaced, not duplicated
+    assert _json.loads(pends[0].draft_json)["task_id"] != 999
+
+
+def test_active_pending_not_clobbered_by_notification(s, team):
+    """If the assignee has a LIVE confirmation in flight (their own /add
+    draft), the acceptance dialogue is skipped - their draft survives."""
+    admin, ravi, priya = team
+    handle_message(s, ravi, "/add My own thing", admin)       # Ravi's live draft
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)
+    r = handle_message(s, admin, "y", admin)
+    assert len(r.extra_sends) == 1
+    assert "Reply Y to accept" not in r.extra_sends[0][1]     # no dialogue
+    r2 = handle_message(s, ravi, "y", admin)                  # confirms HIS draft
+    assert "Created task #" in r2.text and "My own thing" in r2.text
+
+
+def test_silence_counts_as_accepted_after_window(s, team):
+    """30 min without Y/N -> auto-accepted, audit event written, queue
+    cleared; a still-live dialogue and expired /add drafts are untouched."""
+    from datetime import datetime, timedelta
+    import json as _json
+    from app.models import PendingConfirm, StatusEvent
+    from app.scheduler import expire_acceptance_dialogs
+    admin, ravi, priya = team
+    t = _task(s, team)                                        # Ravi's task
+    s.add(PendingConfirm(member_id=ravi.id,                   # expired accept
+          draft_json=_json.dumps({"kind": "accept", "task_id": t.id}),
+          expires_at=datetime.utcnow() - timedelta(minutes=1)))
+    s.add(PendingConfirm(member_id=priya.id,                  # live accept
+          draft_json=_json.dumps({"kind": "accept", "task_id": t.id}),
+          expires_at=datetime.utcnow() + timedelta(minutes=25)))
+    s.add(PendingConfirm(member_id=admin.id,                  # expired draft
+          draft_json=_json.dumps({"title": "x", "assignee_id": admin.id,
+                                  "priority": "medium", "due": ""}),
+          expires_at=datetime.utcnow() - timedelta(minutes=1)))
+    s.commit()
+    expire_acceptance_dialogs()
+    left = {p.member_id for p in s.query(PendingConfirm).all()}
+    assert ravi.id not in left                    # swept
+    assert priya.id in left and admin.id in left  # untouched
+    ev = (s.query(StatusEvent)
+           .filter(StatusEvent.task_id == t.id,
+                   StatusEvent.note.like("auto-accepted%")).all())
+    assert len(ev) == 1 and ev[0].actor_id == ravi.id
+    assert s.get(Task, t.id).status == "open"     # task itself unchanged
+
+
 def test_decline_returns_task_to_creator(s, team):
     admin, ravi, _ = team
     handle_message(s, admin, "/add Fix pump @Ravi", admin)

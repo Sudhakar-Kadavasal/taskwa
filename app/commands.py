@@ -115,17 +115,22 @@ def notify_assignee(s, t: Task, creator: Member | None):
     pr = " [HIGH]" if t.priority == "high" else ""
     who = creator.name if creator else "the dashboard"
     lines = [f"New task from {who}: {t.title}{due}{pr}"]
-    has_pending = (s.query(PendingConfirm)
-                    .filter(PendingConfirm.member_id == assignee.id,
-                            PendingConfirm.expires_at > datetime.utcnow())
-                    .count() > 0)
-    if not has_pending:
+    has_active = (s.query(PendingConfirm)
+                   .filter(PendingConfirm.member_id == assignee.id,
+                           PendingConfirm.expires_at > datetime.utcnow())
+                   .count() > 0)
+    if not has_active:
+        # clear any EXPIRED leftover first - member_id is UNIQUE, and a
+        # stale row otherwise breaks the insert (v1.6.3 hotfix)
+        s.query(PendingConfirm).filter(
+            PendingConfirm.member_id == assignee.id).delete()
         s.add(PendingConfirm(
             member_id=assignee.id,
             draft_json=json.dumps({"kind": "accept", "task_id": t.id}),
-            expires_at=datetime.utcnow() + timedelta(hours=24)))
+            expires_at=datetime.utcnow() + timedelta(minutes=30)))
         s.flush()
-        lines += ["", "Reply Y to accept, N to decline."]
+        lines += ["", "Reply Y to accept, N to decline "
+                      "(no reply in 30 min counts as accepted)."]
     lines += ["", _serial_footer(t.id)]
     return chat_id_for_phone(assignee.phone), "\n".join(lines)
 
