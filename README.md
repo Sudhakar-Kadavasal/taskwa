@@ -17,8 +17,8 @@ Reply:  1 done  |  1 in progress  |  1 block <reason>
 **Zero per-message cost. Zero per-token cost. Your hardware, your data.**
 
 > **Honest notice:** this project uses an *unofficial* WhatsApp gateway
-> ([WAHA](https://waha.devlike.pro)). Numbers can be banned. **Use a dedicated SIM/number, never your
-> personal one.** The official Meta API is not used because it cannot send to
+> ([WAHA](https://waha.devlike.pro)). **Use a dedicated SIM/number, avoid your
+> personal one**, If you are using your personal, look at the settings and check the box which says "using personal number"The official Meta API is not used because it cannot send to
 > groups and charges per message.
 
 ## What you need
