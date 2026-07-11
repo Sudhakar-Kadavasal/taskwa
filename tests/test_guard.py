@@ -102,3 +102,42 @@ def test_bulk_add_members_dedupe_and_normalise():
         s.rollback()
     finally:
         s.close()
+
+
+# ---------------- broadcasts (v1.6.0) ----------------
+from app.broadcasts import days_to_cron, render_message, recipients_for
+from app.models import Broadcast as _B
+import json as _j
+
+
+def test_days_to_cron():
+    assert days_to_cron([0, 2, 4]) == "mon,wed,fri"
+    assert days_to_cron([]) == "*"
+    assert days_to_cron(list(range(7))) == "*"
+    assert days_to_cron([6]) == "sun"
+    assert days_to_cron([9, -1, 3]) == "thu"   # invalid days dropped
+
+
+def test_render_message_placeholders():
+    out = render_message("Hi! Today is {day}, {date}.", "UTC")
+    assert "{day}" not in out and "{date}" not in out
+    assert render_message("no placeholders", "UTC") == "no placeholders"
+    # bad tz falls back without crashing
+    assert "{day}" not in render_message("{day}", "Not/AZone")
+
+
+def test_recipients_resolution_and_inactive_skipped():
+    s = SessionLocal()
+    try:
+        m1 = Member(name="A", phone="971500001111")
+        m2 = Member(name="B", phone="971500002222", active=False)
+        g1 = Group(name="G", chat_id="120363999@g.us")
+        s.add_all([m1, m2, g1]); s.flush()
+        b = _B(name="t", message="hello",
+               member_ids=_j.dumps([m1.id, m2.id, 424242]),
+               group_ids=_j.dumps([g1.id]))
+        r = recipients_for(s, b)
+        assert r == ["971500001111@c.us", "120363999@g.us"]
+        s.rollback()
+    finally:
+        s.close()

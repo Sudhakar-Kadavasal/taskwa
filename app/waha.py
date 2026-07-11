@@ -300,9 +300,24 @@ def send_reaction(message_id: str, reaction: str = "\U0001F44D") -> bool:
         return False
 
 
-def paced_send(messages: list[tuple[str, str]]):
-    """Send a batch with human-like random spacing (3-8 s)."""
-    for i, (chat_id, text) in enumerate(messages):
-        send_text(chat_id, text)
-        if i < len(messages) - 1:
-            time.sleep(random.uniform(3, 8))
+_batch_lock = None
+
+
+def _get_batch_lock():
+    global _batch_lock
+    if _batch_lock is None:
+        import threading
+        _batch_lock = threading.Lock()
+    return _batch_lock
+
+
+def paced_send(messages: list[tuple[str, str]], min_gap: float = 3,
+               max_gap: float = 8):
+    """Send a batch with human-like random spacing. A global lock serialises
+    concurrent batches (e.g. a broadcast and the digest firing at the same
+    minute) so sends never burst out in parallel - ban-risk hygiene."""
+    with _get_batch_lock():
+        for i, (chat_id, text) in enumerate(messages):
+            send_text(chat_id, text)
+            if i < len(messages) - 1:
+                time.sleep(random.uniform(min_gap, max_gap))

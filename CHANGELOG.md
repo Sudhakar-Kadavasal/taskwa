@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.6.1 — 2026-07-11
+
+- Unattended operation: one-command autostart installers for macOS
+  (LaunchAgent), Windows (Scheduled Task) and Linux (systemd) that start
+  Docker, wait for the engine, and bring the stack up at every login/boot —
+  including the "containers were stopped when Docker last quit" case that
+  restart policies alone don't cover. New docs/UNATTENDED.md explains the
+  full restart chain (auto power-on, auto-login, Docker, containers).
+
+## v1.6.0 — 2026-07-11
+
+- **Broadcasts**: send your own plain WhatsApp messages to chosen members and
+  groups — verbatim text, no numbering, headers or reply footers. Each
+  broadcast has its own send time and days of the week (or manual-only with a
+  Send-now button), an active/paused switch, and {date} / {day} placeholders.
+- Ban-risk pacing hardened: broadcast recipients are spaced 20–45 s apart,
+  and a global send lock serialises simultaneous batches (broadcast + digest
+  at the same minute queue instead of bursting).
+- Missed broadcasts are deliberately NOT sent late — a "good morning" at 3 PM
+  is worse than none. (Task digests keep their 6-hour catch-up.)
+
 ## v1.5.0 — 2026-07-11
 
 - **Import members from a group**: Members page can now pull any registered

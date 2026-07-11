@@ -136,3 +136,18 @@ class GroupDigestRef(Base):
     pos = Column(Integer, nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Broadcast(Base):
+    """A scheduled plain message - sent verbatim, no digest formatting."""
+    __tablename__ = "broadcasts"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(80), nullable=False)
+    message = Column(Text, nullable=False)
+    member_ids = Column(Text, default="[]")   # JSON list of member ids
+    group_ids = Column(Text, default="[]")    # JSON list of group ids
+    days = Column(Text, default="[]")         # JSON list of ints, 0=Mon .. 6=Sun
+    send_time = Column(String(5), default="") # "HH:MM", empty = manual only
+    active = Column(Boolean, default=True)
+    last_sent = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

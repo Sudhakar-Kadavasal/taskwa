@@ -125,6 +125,7 @@ personal account. A ban would cost you your own WhatsApp, not a spare SIM.
 | `docs/TaskWA-Command-Card.pdf` | One-page cheat sheet — pin it in the group |
 | `docs/TROUBLESHOOTING.md` | Known issues and fixes |
 | `docs/UPGRADE.md` · `docs/BACKUP.md` | Upgrades, backups, restore, uninstall |
+| `docs/UNATTENDED.md` | Auto-restart after reboots/power cuts (macOS/Windows/Linux) |
 | `docs/SECURITY.md` · `docs/VPS.md` | Security model, VPS deployment |
 
 ## License

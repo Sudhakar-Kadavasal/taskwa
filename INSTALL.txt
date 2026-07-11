@@ -135,6 +135,12 @@ STEP 8 - KEEP IT ALIVE
   Both   : Docker Desktop set to start at login (Step 0).
   Digests missed by less than 6 hours are sent when the machine wakes.
 
+  FULLY UNATTENDED (survive reboots & power cuts automatically):
+    macOS  : ./scripts/autostart-macos.sh
+    Windows: powershell -ExecutionPolicy Bypass -File scripts\autostart-windows.ps1
+    Linux  : sudo ./scripts/autostart-linux.sh
+  Details: docs/UNATTENDED.md
+
 
 EVERYDAY COMMANDS
 -----------------------------------------------------------------------

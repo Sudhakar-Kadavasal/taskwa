@@ -13,8 +13,8 @@ from . import security, waha
 from .db import get_setting, session_scope, set_setting
 from .engine import (bulk_add_members, change_status, create_task,
                      sort_tasks)
-from .models import (Group, Member, MessageLog, StatusEvent, Task,
-                     PRIORITIES, STATUSES)
+from .models import (Broadcast, Group, Member, MessageLog,
+                     StatusEvent, Task, PRIORITIES, STATUSES)
 
 router = APIRouter()
 templates = Jinja2Templates(
@@ -43,6 +43,17 @@ def _localtime(value, fmt="%d %b %H:%M"):
 
 
 templates.env.filters["localtime"] = _localtime
+
+
+def _fromjson(value):
+    import json as _j
+    try:
+        return _j.loads(value or "[]")
+    except ValueError:
+        return []
+
+
+templates.env.filters["fromjson"] = _fromjson
 
 
 def _authed(request: Request) -> bool:
@@ -377,6 +388,87 @@ def group_toggle(request: Request, group_id: int):
         if g:
             g.active = not g.active
     return RedirectResponse("/groups", status_code=303)
+
+
+# ---------------- broadcasts ----------------
+import json as _json
+
+
+def _parse_broadcast_form(form):
+    days = [int(d) for d in form.getlist("days")] if hasattr(form, "getlist") else []
+    return dict(
+        name=str(form.get("name", "")).strip()[:80] or "Untitled",
+        message=str(form.get("message", "")).strip(),
+        member_ids=_json.dumps([int(x) for x in form.getlist("member_ids")]),
+        group_ids=_json.dumps([int(x) for x in form.getlist("group_ids")]),
+        days=_json.dumps(days),
+        send_time=str(form.get("send_time", "")).strip(),
+        active=form.get("active") == "on",
+    )
+
+
+def _bcast_ctx(request, s, b=None):
+    from .broadcasts import DAY_NAMES
+    return _ctx(request, s,
+                broadcasts=s.query(Broadcast).order_by(Broadcast.name).all(),
+                members=s.query(Member).filter(Member.active.is_(True)).all(),
+                groups_all=s.query(Group).filter(Group.active.is_(True)).all(),
+                day_names=DAY_NAMES, b=b,
+                b_members=_json.loads(b.member_ids) if b else [],
+                b_groups=_json.loads(b.group_ids) if b else [],
+                b_days=_json.loads(b.days) if b else [])
+
+
+@router.get("/broadcasts", response_class=HTMLResponse)
+def broadcasts_page(request: Request, edit: int = 0, sent: int = 0):
+    if (r := _guard(request)):
+        return r
+    with session_scope() as s:
+        b = s.get(Broadcast, edit) if edit else None
+        ctx = _bcast_ctx(request, s, b)
+        ctx["sent"] = sent
+        return templates.TemplateResponse(request, "broadcasts.html", ctx)
+
+
+@router.post("/broadcasts/save")
+async def broadcast_save(request: Request):
+    if (r := _guard(request)):
+        return r
+    form = await request.form()
+    bid = int(form.get("id") or 0)
+    data = _parse_broadcast_form(form)
+    with session_scope() as s:
+        b = s.get(Broadcast, bid) if bid else None
+        if b is None:
+            b = Broadcast()
+            s.add(b)
+        for k, v in data.items():
+            setattr(b, k, v)
+    from .scheduler import reload_broadcast_jobs
+    reload_broadcast_jobs()
+    return RedirectResponse("/broadcasts", status_code=303)
+
+
+@router.post("/broadcasts/{bid}/delete")
+def broadcast_delete(request: Request, bid: int):
+    if (r := _guard(request)):
+        return r
+    with session_scope() as s:
+        b = s.get(Broadcast, bid)
+        if b:
+            s.delete(b)
+    from .scheduler import reload_broadcast_jobs
+    reload_broadcast_jobs()
+    return RedirectResponse("/broadcasts", status_code=303)
+
+
+@router.post("/broadcasts/{bid}/send-now")
+def broadcast_send_now(request: Request, bid: int):
+    if (r := _guard(request)):
+        return r
+    from .scheduler import run_broadcast_soon
+    run_broadcast_soon(bid)
+    return RedirectResponse("/broadcasts?sent=1", status_code=303)
 
 
 # ---------------- settings, health, export ----------------

@@ -23,6 +23,7 @@ log = logging.getLogger("scheduler")
 scheduler = BackgroundScheduler()
 
 _DIGEST_JOB_PREFIX = "digest-"
+_BCAST_JOB_PREFIX = "bcast-"
 
 
 def reload_digest_jobs():
@@ -197,8 +198,52 @@ def startup_catchup():
     send_daily_digests()
 
 
+def reload_broadcast_jobs():
+    """(Re)create one cron job per active, scheduled broadcast.
+    No cold-boot catch-up on purpose: a missed 'good morning' should be
+    skipped, not delivered at 3 PM."""
+    import json as _json
+    from .broadcasts import days_to_cron, send_broadcast
+    from .models import Broadcast
+    for job in scheduler.get_jobs():
+        if job.id.startswith(_BCAST_JOB_PREFIX):
+            scheduler.remove_job(job.id)
+    with session_scope() as s:
+        tzname = get_setting(s, "timezone") or "UTC"
+        rows = [(b.id, b.send_time, b.days) for b in
+                s.query(Broadcast).filter(Broadcast.active.is_(True)).all()
+                if b.send_time]
+    try:
+        tz = ZoneInfo(tzname)
+    except Exception:
+        tz = None
+    for bid, t, days_json in rows:
+        try:
+            hh, mm = t.strip().split(":")
+            dow = days_to_cron(_json.loads(days_json or "[]"))
+            scheduler.add_job(send_broadcast, CronTrigger(
+                day_of_week=dow, hour=int(hh), minute=int(mm), timezone=tz),
+                args=[bid], id=f"{_BCAST_JOB_PREFIX}{bid}",
+                replace_existing=True, misfire_grace_time=300, coalesce=True)
+        except Exception as e:
+            log.error("bad broadcast schedule (id=%s, %r): %s", bid, t, e)
+    log.info("broadcast jobs: %s", [j.id for j in scheduler.get_jobs()
+                                    if j.id.startswith(_BCAST_JOB_PREFIX)])
+
+
+def run_broadcast_soon(broadcast_id: int):
+    """Queue a one-shot Send-now so the dashboard request returns instantly
+    (a 10-recipient broadcast takes minutes at broadcast pacing)."""
+    from .broadcasts import send_broadcast
+    scheduler.add_job(send_broadcast, "date",
+                      run_date=datetime.now() + timedelta(seconds=2),
+                      args=[broadcast_id],
+                      id=f"bcast-now-{broadcast_id}-{datetime.utcnow().timestamp()}")
+
+
 def start():
     reload_digest_jobs()
+    reload_broadcast_jobs()
     scheduler.add_job(check_gateway_health, "interval", minutes=5,
                       id="health", replace_existing=True,
                       next_run_time=datetime.utcnow())
