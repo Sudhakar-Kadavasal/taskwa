@@ -1,0 +1,68 @@
+Copy everything below the line and paste it into ChatGPT, Claude, or any
+AI assistant. It will walk you through installing TaskWA, one step at a
+time, checking your results as you go.
+
+-----------------------------------------------------------------------
+
+You are helping me install TaskWA, a self-hosted WhatsApp task manager,
+on my computer. Please act as a patient, step-by-step installation guide.
+
+About TaskWA:
+- Open source (MIT): https://github.com/sudhakar-kadavasal/taskwa
+- Runs in Docker: two containers (a Python app and a WAHA WhatsApp
+  gateway), started with "docker compose up -d" from the project folder.
+- The complete official instructions are in the file INSTALL.txt in the
+  repository root - fetch or ask me to paste it if you need the details.
+- It sends each team member one WhatsApp task digest daily; they reply
+  "1 done" to update. Setup is finished through a web wizard at
+  http://localhost:3000 after the containers start.
+
+How I want you to guide me:
+1. First ask me: what operating system I am using (macOS - and whether
+   it is an Apple Silicon or Intel Mac - Windows, or Linux), and whether
+   I already have Docker installed.
+2. Then take me through these stages ONE AT A TIME, waiting for me to
+   confirm each worked before continuing:
+   a. Install Docker Desktop (docker.com/products/docker-desktop) and
+      verify with: docker --version
+   b. Get the code: git clone
+      https://github.com/sudhakar-kadavasal/taskwa.git && cd taskwa
+      (or download and unzip the release, then cd taskwa)
+   c. Create .env from .env.example and set three random secrets
+      (WEBHOOK_SECRET, APP_SECRET, WAHA_API_KEY - generate each with
+      "openssl rand -hex 24"). IMPORTANT: on Apple Silicon Macs and
+      Raspberry Pi, also uncomment the line "# WAHA_TAG=arm" in .env.
+      INSTALL.txt Step 2 has a copy-paste block that does all of this
+      automatically on macOS/Linux/Git Bash - prefer that.
+   d. Start it: docker compose up -d
+      then verify both containers show "Up": docker compose ps
+   e. Open http://localhost:3000 and complete the 5-step wizard:
+      admin password -> scan the WhatsApp QR with the bot number's
+      phone (WhatsApp > Settings > Linked devices) -> timezone and
+      daily send time -> add team members (name + number with country
+      code, digits only; me first as admin) -> test message + finish.
+   f. Remind me: TaskWA starts in DRY-RUN mode (messages are logged on
+      the Health page, not sent). When my rehearsal looks right:
+      Settings -> untick Dry-run -> Save.
+   g. If the bot runs on my own personal WhatsApp number: Settings ->
+      tick "Personal number mode" -> Save.
+3. When something fails, ask me for the exact error text or the output
+   of "docker compose logs app --tail 30" / "docker compose logs waha
+   --tail 30" and diagnose from that. Known issues and fixes are in
+   docs/TROUBLESHOOTING.md - notably:
+   - "docker: command not found" -> Docker Desktop not installed or
+     never launched; open it, wait for the whale icon, open a NEW
+     terminal.
+   - "no matching manifest for linux/arm64" -> add WAHA_TAG=arm to
+     .env, then docker compose up -d again.
+   - QR never appears / session FAILED -> wait 60 seconds, click
+     "Start / restart session" on the page, refresh; persisting:
+     docker compose up -d --force-recreate waha
+4. Finish by having me prove the loop end to end: from my phone send
+   /mytasks to the bot, create a task with
+   "/add Test task today", reply "y", then "1 done" - I should get a
+   thumbs-up reaction and see the task closed on the dashboard.
+
+Please keep answers short and practical: one stage at a time, exact
+commands I can copy-paste, and always tell me what output to expect.
+Start with your questions from point 1.

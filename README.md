@@ -119,6 +119,7 @@ personal account. A ban would cost you your own WhatsApp, not a spare SIM.
 | Document | For |
 |---|---|
 | `INSTALL.txt` | Copy-paste installation, every platform |
+| `docs/AI-INSTALL-PROMPT.txt` | No coding? Paste this into ChatGPT/Claude and it guides your install |
 | `docs/TaskWA-Installation-Guide.pdf` | Illustrated step-by-step install |
 | `docs/TaskWA-User-Manual.pdf` | Team members (2 pages) + administrators |
 | `docs/TaskWA-Command-Card.pdf` | One-page cheat sheet — pin it in the group |

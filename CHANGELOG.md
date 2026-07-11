@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.0 — 2026-07-11
+
+- Brand finalised as **TaskWA**; official Mint Ledger document set and flyer
+  shipped in docs/.
+- Dashboard restyled to the Mint Ledger theme (mint paper, emerald primary,
+  cream/amber notices) to match the brand.
+- docs/AI-INSTALL-PROMPT.txt: a paste-ready prompt that turns any AI
+  assistant into a step-by-step installation guide, as referenced on the
+  flyer.
+
 ## v1.3.1 — 2026-07-11
 
 - Cold-boot catch-up: if the machine was fully powered off at a scheduled
