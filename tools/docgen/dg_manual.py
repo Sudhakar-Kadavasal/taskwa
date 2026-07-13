@@ -174,7 +174,10 @@ E.append(P("Register each person with a name and their WhatsApp number (country 
            "from any other number are ignored silently. Roles: <b>admin</b> receives blocker "
            "alerts and can update anyone's task; <b>member</b> manages only their own. "
            "Deactivating a member stops their digests and their commands instantly — reassign "
-           "their open tasks first from the Tasks page."))
+           "their open tasks first from the Tasks page. <b>Change a member's role any time</b> "
+           "with the dropdown in their row (it saves on selection). Promotion to admin is "
+           "deliberately dashboard-only — no chat command can do it — and the last active "
+           "admin cannot be demoted: promote a successor first."))
 E.append(P("<b>The fast way — import from a group.</b> Members page → <b>Import from "
            "group</b> → pick a registered group: every participant appears in a table with "
            "their name and number pre-filled. Tick the ones you want, fix names, click "

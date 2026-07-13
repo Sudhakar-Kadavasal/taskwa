@@ -301,7 +301,8 @@ def task_edit(request: Request, task_id: int, title: str = Form(...),
 
 # ---------------- members & groups ----------------
 @router.get("/members", response_class=HTMLResponse)
-def members_page(request: Request, imported: int = -1, skipped: int = 0):
+def members_page(request: Request, imported: int = -1, skipped: int = 0,
+                 err: str = ""):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
@@ -309,7 +310,37 @@ def members_page(request: Request, imported: int = -1, skipped: int = 0):
         groups = s.query(Group).filter(Group.active.is_(True)).all()
         return templates.TemplateResponse(request, "members.html", _ctx(
             request, s, members=members, groups=groups,
-            imported=imported, skipped=skipped))
+            imported=imported, skipped=skipped, err=err[:200]))
+
+
+def is_last_active_admin(s, member: Member) -> bool:
+    """True when demoting/deactivating this member would leave zero active
+    admins - blocker alerts and full task control would have no owner."""
+    if member.role != "admin" or not member.active:
+        return False
+    return (s.query(Member)
+             .filter(Member.role == "admin", Member.active.is_(True),
+                     Member.id != member.id).count()) == 0
+
+
+@router.post("/members/{member_id}/role")
+def member_role(request: Request, member_id: int, role: str = Form(...)):
+    if (r := _guard(request)):
+        return r
+    from urllib.parse import quote
+    if role not in ("admin", "member"):
+        return RedirectResponse("/members", status_code=303)
+    with session_scope() as s:
+        m = s.get(Member, member_id)
+        if m is None:
+            return RedirectResponse("/members", status_code=303)
+        if role == "member" and is_last_active_admin(s, m):
+            return RedirectResponse(
+                "/members?err=" + quote(
+                    f"{m.name} is the last active admin - promote someone "
+                    "else first, then demote."), status_code=303)
+        m.role = role
+    return RedirectResponse("/members", status_code=303)
 
 
 @router.get("/members/import", response_class=HTMLResponse)

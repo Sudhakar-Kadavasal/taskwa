@@ -2,6 +2,7 @@
 {% block title %}Members{% endblock %}
 {% block content %}
 <h1>Team members</h1>
+{% if err %}<div class="banner bad">{{ err }}</div>{% endif %}
 {% if imported is defined and imported >= 0 %}
 <div class="banner ok">Imported {{ imported }} member{{ '' if imported == 1 else 's' }}{% if skipped %} · {{ skipped }} skipped (already registered or no number){% endif %}.</div>
 {% endif %}
@@ -10,7 +11,15 @@
     <tr><th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th></th></tr>
     {% for m in members %}
     <tr>
-      <td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td>
+      <td>{{ m.name }}</td><td>{{ m.phone }}</td>
+      <td>
+        <form method="post" action="/members/{{ m.id }}/role" class="inline-form">
+          <select name="role" onchange="this.form.submit()">
+            <option value="member" {% if m.role == 'member' %}selected{% endif %}>member</option>
+            <option value="admin" {% if m.role == 'admin' %}selected{% endif %}>admin</option>
+          </select>
+        </form>
+      </td>
       <td>{% if m.active %}<span class="badge b-done">active</span>
           {% else %}<span class="badge b-cancelled">inactive</span>{% endif %}</td>
       <td><form method="post" action="/members/{{ m.id }}/toggle" class="inline-form">

@@ -21,6 +21,9 @@
 - **`/myadd`** — every open task you created for others, with status,
   block age and your close/cancel powers. **`/help` is now role-aware**:
   members see member commands; admins DM'ing the bot get the admin set too.
+- **Members page: change a member's role** with a per-row dropdown (saves on
+  selection). Promotion to admin remains dashboard-only by design, and the
+  last active admin cannot be demoted — promote a successor first.
 - **Broadcasts is now the Nudger** (dashboard nav, page and labels renamed;
   routes and internals unchanged): plain messages, sent exactly as typed —
   no numbering, no reply footer: polite nudging without seeming like an

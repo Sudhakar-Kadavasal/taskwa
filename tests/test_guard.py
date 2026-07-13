@@ -143,6 +143,27 @@ def test_recipients_resolution_and_inactive_skipped():
         s.close()
 
 
+# ---------------- role change guard (v1.6.4) ----------------
+def test_last_active_admin_cannot_be_demoted():
+    from app.ui import is_last_active_admin
+    s = SessionLocal()
+    try:
+        sk = s.query(Member).filter(Member.phone == "971500000001").first()
+        assert is_last_active_admin(s, sk)          # only admin -> guarded
+        m2 = Member(name="Second", phone="971500000077", role="admin")
+        s.add(m2); s.flush()
+        assert not is_last_active_admin(s, sk)      # another admin exists
+        m2.active = False
+        s.flush()
+        assert is_last_active_admin(s, sk)          # inactive doesn't count
+        member = Member(name="Plain", phone="971500000078", role="member")
+        s.add(member); s.flush()
+        assert not is_last_active_admin(s, member)  # members never guarded
+        s.rollback()
+    finally:
+        s.close()
+
+
 # ---------------- lid-addressed DMs (v1.6.3) ----------------
 def test_lid_recipient_resolves_to_registered_member():
     """A DM reply to a …@lid chat must be rewritten to phone@c.us and pass
