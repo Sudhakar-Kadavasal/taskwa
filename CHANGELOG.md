@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.6.4 — 2026-07-13
+
+- **Admin commands over WhatsApp (DM the bot only, Y/N confirmed, no AI —
+  fixed grammar):** `/nudge [HH:MM] [days] [@Name] [#group] <message>`
+  creates a nudge from the phone; `/nudges` lists them; `/nudge <n> <time/
+  days/recipients>` reschedules (text changes = delete & recreate);
+  `/nudge on|off <n>` pauses/resumes instantly; `/nudge delete <n>` asks
+  Y/N. `/adduser <number> <name>` registers a member (always role member —
+  promotion stays dashboard-only; re-adding an inactive number reactivates
+  it); `/members` lists everyone. Non-admins are refused; groups get
+  silence.
+- **`/add` gains a `#group` tag** (DM-created tasks): `#site` matches a
+  registered group by unique substring (dots = spaces), the task posts to
+  that group, and on Y the bot announces it there — "New task for Ravi: …"
+  with reply numbers — so the creator immediately sees it reached the right
+  place. The creator must be a member of that group (verified against the
+  live participant list; admins exempt; unverifiable = refused, never
+  guessed).
+- **`/myadd`** — every open task you created for others, with status,
+  block age and your close/cancel powers. **`/help` is now role-aware**:
+  members see member commands; admins DM'ing the bot get the admin set too.
+- **Broadcasts is now the Nudger** (dashboard nav, page and labels renamed;
+  routes and internals unchanged): plain messages, sent exactly as typed —
+  no numbering, no reply footer: polite nudging without seeming like an
+  assigned task.
+- **User Manual: new administrator walkthrough** — the Tasks page
+  (one-click Done/Cancel, Set-with-note, edit, create, exports) documented
+  page by page, plus a **Troubleshooting — restart cookbook** section:
+  restarting the gateway/app/stack/Docker, fixing 'docker: command not
+  found' after an engine switch, verifying the autostart is armed, and
+  reading the logs. Installation Guide gained the same cookbook and
+  autostart checks in its troubleshooting section. Manual is now 7 pages.
+
 ## v1.6.3 — 2026-07-11
 
 - **Assignees are now notified the moment a task is created for them**

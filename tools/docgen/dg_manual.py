@@ -74,6 +74,9 @@ E.append(P("<b>See your list any time:</b> send <font face='Mono-Bold'>/mytasks<
 E.append(P("Creating a task", "h2"))
 E.append(P("Send /add with a title. Mention someone to assign it to them; add "
            "<font face='Mono'>!high</font> or <font face='Mono'>!low</font> for priority; "
+           "add <font face='Mono'>#group</font> to post it to a registered group "
+           "(any part of the group's name works — <font face='Mono'>#site</font> finds "
+           "'Site B Construction'; dots stand for spaces); "
            "end with a date word — today, tomorrow, fri, or 25/07:"))
 E.append(chat_bubble(["/add Send Q2 invoice @Priya fri !high"], sender="me", width=FW*0.6))
 E.append(chat_bubble(['Create task: "Send Q2 invoice" -> Priya,',
@@ -83,6 +86,15 @@ E.append(Spacer(1, 4))
 E.append(P("Reply <font face='Mono-Bold'>y</font> and it's created. Nothing is created "
            "without your confirmation. In a group, the task shows up in that group's "
            "daily list; otherwise <b>the assignee is told immediately</b> (next section)."))
+E.append(P("<b>Created it with a #group tag?</b> On your Y the bot posts one "
+           "announcement in that group — \"New task for Ravi: …\" with the reply "
+           "numbers — so you instantly see it reached the right place. You must be a "
+           "member of that group yourself (admins are exempt); if WhatsApp privacy "
+           "settings prevent verifying the member list, the task is refused rather "
+           "than guessed."))
+E.append(P("<b>Track what you've delegated:</b> send <font face='Mono-Bold'>/myadd"
+           "</font> — every open task you created for someone else, with its status, "
+           "age of any block, and the reminder that you can close or cancel each one."))
 
 E.append(P("When a task is created FOR you", "h2"))
 E.append(P("The moment someone assigns you a task, you get a message — no waiting for "
@@ -130,7 +142,31 @@ E.append(PageBreak())
 # ================= PART II =================
 E += section("II", "For the administrator")
 E.append(P("You run TaskWA from the dashboard at <font face='Mono'>http://localhost:3000</font> "
-           "on the machine where it is installed. Log in with the admin password.", "lede"))
+           "on the machine where it is installed. Log in with the admin password. "
+           "This part walks the dashboard page by page, then covers "
+           "troubleshooting and routine care.", "lede"))
+
+E.append(P("The Tasks page — your daily driver", "h2"))
+E.append(P("The front page lists tasks with filters for status and assignee "
+           "(the default view is everything still open). Each row shows the "
+           "task's permanent # number, blocker details in red, and the group "
+           "it posts to. Under <b>Actions</b>:"))
+E.append(table(["Control", "What it does"],
+    [["✓ Done  /  ✗ Cancel", "One click closes or cancels the task (Cancel asks "
+      "for confirmation). The assignee gets one WhatsApp notice that it's off "
+      "their list — in the task's group if it has one, else a DM. No notice "
+      "when the assignee is an admin."],
+     ["Status dropdown + Set", "Any other transition — reopen, in progress, "
+      "blocked (type the reason in the note box first). An impossible change "
+      "shows a red banner explaining why instead of failing silently."],
+     ["edit", "Expand to change title, assignee, priority, due date, "
+      "description or group posting."],
+     ["New task (below the list)", "Create a task from the browser — the "
+      "assignee gets the same instant accept/decline message as with /add."]],
+    [4.2*cm, FW-4.2*cm]))
+E.append(P("Exports live at the bottom of the page: <b>tasks.csv</b> (current "
+           "data) and <b>audit.csv</b> (every status change ever, with who, "
+           "when and the raw message text)."))
 
 E.append(P("Members", "h2"))
 E.append(P("Register each person with a name and their WhatsApp number (country code + "
@@ -153,26 +189,63 @@ E.append(P("Add the bot's WhatsApp number to the group, then click <b>Detect my 
            "private. Tasks flagged 'post to group' (or created via /add inside the group) "
            "appear in that group's daily digest instead of the assignee's personal one."))
 
-E.append(P("Broadcasts — your own plain messages, on a schedule", "h2"))
-E.append(P("Broadcasts send <b>exactly the text you type</b> to chosen members and "
-           "groups — no task numbers, no headers, no reply footer. Recipients see an "
-           "ordinary WhatsApp message from you. Use them for the daily good-morning, "
-           "status nudges, or anything that isn't a task."))
-E.append(table(["On the Broadcasts page", "Notes"],
+E.append(P("Nudger — your own plain messages, on a schedule", "h2"))
+E.append(P("The Nudger sends <b>exactly the text you type</b> to chosen members and "
+           "groups — no task numbers, no headers, no reply footer: polite nudging "
+           "without seeming like an assigned task. Recipients and groups see an "
+           "ordinary WhatsApp message from you. Use it for the daily good-morning, "
+           "status follow-ups, or anything that isn't a task. Manage nudges here on "
+           "the dashboard, or entirely from WhatsApp with /nudge (next section)."))
+E.append(table(["On the Nudger page", "Notes"],
     [["Message text", "Sent verbatim. {date} becomes '11 July 2026', {day} becomes "
       "'Friday'. WhatsApp *bold* and _italic_ work."],
      ["Days + send time", "Tick weekdays and set a time — or leave the time empty for a "
-      "manual-only broadcast you fire with Send now."],
-     ["Time zone", "Each broadcast has its own timezone dropdown (defaults to the "
+      "manual-only nudge you fire with Send now."],
+     ["Time zone", "Each nudge has its own timezone dropdown (defaults to the "
       "dashboard setting) and is PINNED to it when saved — changing the dashboard "
-      "timezone later never moves an existing broadcast."],
+      "timezone later never moves an existing nudge."],
      ["Recipients", "Any registered members and groups. To message someone who isn't on "
       "the task team, register them as a member — with no tasks they'll never get "
-      "digests, only your broadcasts."],
+      "digests, only your nudges."],
      ["Pacing", "Recipients are messaged 20–45 seconds apart and never overlap other "
       "TaskWA sends — ban-risk hygiene. A missed send (machine off) is deliberately "
       "skipped, not delivered late."]],
     [3.6*cm, FW-3.6*cm]))
+
+E.append(P("Admin commands over WhatsApp — no dashboard needed", "h2"))
+E.append(P("Admins can run the essentials from their phone by <b>DM'ing the bot "
+           "directly</b> (on a personal-number install that means your own "
+           "'Message Yourself' chat). These commands are ignored in groups and "
+           "refused for non-admins; anything that creates or deletes asks Y/N "
+           "first. No AI involved — fixed wording, options first, message last."))
+E.append(table(["Command", "What it does"],
+    [[Paragraph("<font face='Mono-Bold'>/nudge 07:30 mon,wed,fri #site "
+                "Good morning - plan for {day}?</font>", S["tcell"]),
+      "Create a nudge: time (24h, else manual-only), days (or 'daily' / "
+      "omit = every day), @Name members and #group targets, then the "
+      "message, sent verbatim. Timezone pins to the dashboard setting."],
+     [Paragraph("<font face='Mono-Bold'>/nudges</font>", S["tcell"]),
+      "Numbered list of every nudge with schedule, recipients and "
+      "active/paused state."],
+     [Paragraph("<font face='Mono-Bold'>/nudge 3 08:15 tue,thu</font>", S["tcell"]),
+      "Reschedule nudge 3 — time, days and/or recipients. The text never "
+      "changes this way: delete and recreate, or use the dashboard."],
+     [Paragraph("<font face='Mono-Bold'>/nudge off 3   /nudge on 3</font>", S["tcell"]),
+      "Pause / resume instantly (reversible, so no confirmation)."],
+     [Paragraph("<font face='Mono-Bold'>/nudge delete 3</font>", S["tcell"]),
+      "Delete after a Y/N confirmation."],
+     [Paragraph("<font face='Mono-Bold'>/adduser 971501234567 Ravi Kumar</font>",
+                S["tcell"]),
+      "Register a member (spaces and + in the number are fine). Always "
+      "role 'member' — promoting to admin stays a dashboard-only act. "
+      "Re-adding an inactive number reactivates it. CHECK THE NUMBER in "
+      "the Y/N prompt: a typo would register a stranger."],
+     [Paragraph("<font face='Mono-Bold'>/members</font>", S["tcell"]),
+      "List everyone registered, with roles and inactive flags."],
+     [Paragraph("<font face='Mono-Bold'>/help</font>", S["tcell"]),
+      "Role-aware: members see member commands; admins (in DM) also get "
+      "this admin section."]],
+    [5.2*cm, FW-5.2*cm]))
 
 E.append(P("Settings that matter", "h2"))
 E.append(table(["Setting", "Meaning"],
@@ -205,6 +278,55 @@ E.append(P("The message log at the bottom shows every outbound message with its 
            "shown), and <b>blocked</b> (recipient not registered — the allowlist refused it, "
            "which is the system protecting you)."))
 
+E.append(P("Troubleshooting — the restart cookbook", "h2"))
+E.append(P("All commands run in Terminal, from the folder TaskWA is installed in "
+           "(the one containing <font face='Mono'>docker-compose.yml</font> and "
+           "<font face='Mono'>data/</font>). Nothing here loses data — the "
+           "database, backups and the WhatsApp pairing all live in "
+           "<font face='Mono'>data/</font> on your disk and survive every "
+           "restart below."))
+E.append(table(["Situation", "Do this"],
+    [["WhatsApp gateway stuck (FAILED / stuck QR / no messages)",
+      Paragraph("<font face='Mono'>docker compose restart waha</font> — wait a "
+                "minute, check Health. Stubborn: <font face='Mono'>docker compose "
+                "up -d --force-recreate waha</font> (pairing survives; worst "
+                "case re-scan the QR).", S["tcell"])],
+     ["App misbehaving / dashboard not loading",
+      Paragraph("<font face='Mono'>docker compose restart app</font>", S["tcell"])],
+     ["Restart everything cleanly",
+      Paragraph("<font face='Mono'>docker compose down</font> then "
+                "<font face='Mono'>docker compose up -d</font>", S["tcell"])],
+     ["Docker itself is wedged",
+      Paragraph("Quit Docker Desktop from the whale menu, reopen it, wait for "
+                "the steady whale, then <font face='Mono'>docker compose up "
+                "-d</font>.", S["tcell"])],
+     ["'docker: command not found'",
+      Paragraph("Docker's CLI links are broken (typical after switching "
+                "container engines). Docker Desktop → Settings → Advanced → "
+                "toggle the CLI tools to <b>User</b>, Apply, back to "
+                "<b>System</b>, Apply &amp; Restart (enter your password). "
+                "Never run two container engines at once.", S["tcell"])],
+     ["Nothing starts after a reboot",
+      Paragraph("The autostart isn't armed. From the install folder run "
+                "<font face='Mono'>./scripts/autostart-macos.sh</font> "
+                "(Windows: <font face='Mono'>autostart-windows.ps1</font>, "
+                "Linux: <font face='Mono'>sudo ./scripts/autostart-linux.sh"
+                "</font>). Also set: Docker Desktop → 'Start when you sign "
+                "in', automatic login, and on a Mac <font face='Mono'>sudo "
+                "pmset -a autorestart 1</font> for power cuts. Verify: check "
+                "<font face='Mono'>launchctl list | grep taskwa</font>, log at "
+                "<font face='Mono'>/tmp/taskwa-autostart.log</font>. Full "
+                "chain: docs/UNATTENDED.md.", S["tcell"])],
+     ["What actually happened?",
+      Paragraph("<font face='Mono'>docker compose logs app --since 30m</font> — "
+                "every message, drop reason and error is logged. The Health "
+                "page's message log shows every outbound send and why any "
+                "were blocked.", S["tcell"])]],
+    [4.0*cm, FW-4.0*cm]))
+E.append(P("The acid test after any repair: reboot the machine, touch nothing, "
+           "wait three minutes, open the Health page — it should say "
+           "<b>WORKING</b> on its own."))
+
 E.append(P("Routine care", "h2"))
 for b in [
  "<b>Backups are automatic</b> — nightly database snapshots, 14 kept, in the backups folder. To restore: stop the app, copy a snapshot over data/tasks.db, start again.",
@@ -212,7 +334,7 @@ for b in [
  "<b>Forgotten password</b> — 'Forgot password' on the login page sends a 6-digit code to your WhatsApp. If WhatsApp itself is down: docker compose exec app python -m app.cli reset-password",
  "<b>Upgrades</b> — see docs/UPGRADE.md; in short: git pull, docker compose up -d --build. Data survives.",
  "<b>Survive restarts automatically</b> — run the one-command autostart installer for your OS (scripts/autostart-macos.sh, autostart-windows.ps1, sudo autostart-linux.sh): at every login/boot it starts Docker, waits for the engine, and brings TaskWA up. Full four-link chain (auto power-on, auto-login, Docker, containers) in docs/UNATTENDED.md.",
- "<b>Keep the machine awake</b> — a sleeping laptop sends no digests. Digests missed by under 6 hours send on wake; missed broadcasts are skipped on purpose.",
+ "<b>Keep the machine awake</b> — a sleeping laptop sends no digests. Digests missed by under 6 hours send on wake; missed nudges are skipped on purpose.",
 ]:
     E.append(P("•  " + b, "bullet"))
 E.append(Spacer(1, 4))

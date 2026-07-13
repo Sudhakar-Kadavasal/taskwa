@@ -8,3 +8,5 @@ __pycache__/
 # internal AI-session notes - never published
 CLAUDE.md
 .claude/
+
+.DS_Store

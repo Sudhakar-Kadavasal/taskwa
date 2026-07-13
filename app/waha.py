@@ -168,9 +168,18 @@ def list_groups() -> list[dict]:
     return []
 
 
-def group_participants(chat_id: str) -> list[dict]:
-    """Participants of a group, best-effort across WAHA versions:
-    [{'phone': digits or '', 'lid': str, 'name': str, 'resolved': bool}]"""
+def group_member_phones(chat_id: str) -> tuple[set, bool]:
+    """Lightweight membership lookup: (set of resolved phone digits,
+    all_resolved). No per-contact name fetches - fast enough to run inside
+    a Y-confirmation. all_resolved=False means privacy-hidden participants
+    exist, so absence from the set is NOT proof of absence from the group."""
+    parts = _raw_participants(chat_id)
+    phones = {p["phone"] for p in parts if p["phone"]}
+    return phones, bool(parts) and len(phones) == len(parts)
+
+
+def _raw_participants(chat_id: str) -> list[dict]:
+    """Participant ids of a group, phones resolved where possible."""
     items = None
     try:
         with httpx.Client(base_url=env.waha_url, headers=_headers(),
@@ -187,7 +196,6 @@ def group_participants(chat_id: str) -> list[dict]:
     except Exception as e:
         log.warning("participants fetch failed for %s: %s", chat_id, e)
         return []
-
     out = []
     for pt in items or []:
         pid = pt.get("id") if isinstance(pt, dict) else pt
@@ -205,6 +213,13 @@ def group_participants(chat_id: str) -> list[dict]:
             continue
         out.append({"phone": phone, "lid": lid, "name": "",
                     "resolved": bool(phone)})
+    return out
+
+
+def group_participants(chat_id: str) -> list[dict]:
+    """Participants of a group, best-effort across WAHA versions:
+    [{'phone': digits or '', 'lid': str, 'name': str, 'resolved': bool}]"""
+    out = _raw_participants(chat_id)
 
     # names, best-effort (contact name, else the person's own pushname)
     try:

@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .engine import (InvalidTransition, PermissionError_, change_status,
                      create_task, open_tasks_for, resolve_ref,
                      save_digest_refs, sort_tasks)
-from .models import Member, PendingConfirm, StatusEvent, Task
+from .models import Group, Member, PendingConfirm, StatusEvent, Task
 
 HELP_TEXT = (
     "*Task bot - commands*\n"
@@ -31,12 +31,26 @@ HELP_TEXT = (
     "1 unblock - release a block that waits on you\n"
     "1 reopen - undo a mistaken 'done'\n"
     "1 cancel - cancel a task you created (creator/admin only)\n"
+    "Y / N - accept a new task, or decline it back to its creator\n"
     "Just 'done' works if you have a single open task,\n"
     "or swipe-reply on a task message and type 'done'.\n"
-    "/add <title> @Name [!high|!low] [today|fri|25/07]\n"
+    "/add <title> @Name [#group] [!high|!low] [today|fri|25/07]\n"
+    "   #group posts + announces it in that group\n"
     "/mytasks - your open tasks\n"
+    "/myadd - open tasks you created for others\n"
     "/list - open tasks you can see\n"
     "/help - this message"
+)
+
+ADMIN_HELP = (
+    "\n\n*Admin (DM the bot only)*\n"
+    "/nudge [HH:MM] [mon,wed,fri|daily] [@Name] [#group] <message>\n"
+    "   - schedule a plain message (Nudger)\n"
+    "/nudge <n> <time/days/@/#> - reschedule nudge n\n"
+    "/nudge on|off|delete <n>\n"
+    "/nudges - list all nudges\n"
+    "/adduser <number> <name> - register a member\n"
+    "/members - list registered members"
 )
 
 VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock|cancel(?:led)?)"
@@ -204,11 +218,25 @@ def _handle_acceptance(s, sender: Member, draft: dict, accepted: bool,
                  extra_sends=[(chat_id_for_phone(owner.phone), txt)])
 
 
-def _created_reply(s, t: Task, sender: Member, assignee: Member) -> Reply:
+def _created_reply(s, t: Task, sender: Member, assignee: Member,
+                   announce: bool = False) -> Reply:
     """Receipt for the creator - always says what happens next, and how to
-    reply (fixes the dead-end 'Created task #N' message)."""
+    reply (fixes the dead-end 'Created task #N' message). announce=True
+    (tag-created group tasks) posts one immediate notice in the group so
+    the creator instantly sees it reached the right place."""
     base = (f"Created task #{t.id}: {t.title} -> {assignee.name}"
             + (f", due {t.due_date:%a %d %b}" if t.due_date else ""))
+    if announce and t.post_to_group_id and t.group and t.group.active:
+        due = f" - due {t.due_date:%a %d %b}" if t.due_date else ""
+        pr = " [HIGH]" if t.priority == "high" else ""
+        note = (f"New task for {assignee.name}: {t.title}{due}{pr}\n\n"
+                + _serial_footer(t.id))
+        extra = [(t.group.chat_id, note)]
+        own = ("\n\n" + _serial_footer(t.id) if assignee.id == sender.id else
+               f"\n\nYou created it, so you can also:  "
+               f"{t.id} done  |  {t.id} cancel")
+        return Reply(text=base + f"\nAnnounced in {t.group.name}." + own,
+                     extra_sends=extra)
     if assignee.id == sender.id:
         return Reply(text=base + "\n\n" + _serial_footer(t.id))
     if t.post_to_group_id:
@@ -221,6 +249,37 @@ def _created_reply(s, t: Task, sender: Member, assignee: Member) -> Reply:
                                  f"{t.id} done  |  {t.id} cancel",
                      extra_sends=[extra])
     return Reply(text=base)
+
+
+def _match_group(s, token: str):
+    """Resolve a #token to a registered active group by case-insensitive
+    substring; dots stand in for spaces (#site.b -> 'site b').
+    Returns (group, None) or (None, error_text). Never guesses on ambiguity."""
+    from .models import Group
+    needle = token.lstrip("#").replace(".", " ").strip().lower()
+    if not needle:
+        return None, "Group tag is empty - use e.g. #site"
+    groups = s.query(Group).filter(Group.active.is_(True)).all()
+    hits = [g for g in groups if needle in g.name.lower()]
+    if len(hits) == 1:
+        return hits[0], None
+    if not hits:
+        return None, (f"No registered group matches '#{token.lstrip('#')}'. "
+                      "Registered groups: "
+                      + (", ".join(g.name for g in groups) or "none") + ".")
+    return None, (f"'#{token.lstrip('#')}' matches several groups: "
+                  + ", ".join(g.name for g in hits)
+                  + ". Be more specific (dots work as spaces, e.g. #site.b).")
+
+
+def _creator_in_group(sender: Member, chat_id: str):
+    """True / False / None(=unverifiable: hidden participants exist and the
+    sender wasn't among the resolvable ones)."""
+    from .waha import group_member_phones
+    phones, all_resolved = group_member_phones(chat_id)
+    if sender.phone in phones:
+        return True
+    return False if all_resolved else None
 
 
 def _find_member_by_ref(s, ref: str) -> Member | None:
@@ -357,6 +416,14 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
         if token in text.lower():
             priority = val
             text = re.sub(re.escape(token), "", text, flags=re.IGNORECASE)
+    # optional #group tag: post the task to that group (DM-created tasks)
+    tag_group = None
+    gm = re.search(r"#([\w.]+)", text)
+    if gm:
+        tag_group, gerr = _match_group(s, gm.group(1))
+        if gerr:
+            return None, gerr
+        text = text.replace(gm.group(0), "")
     assignee = sender
     m = re.search(r"@([A-Za-z][\w.]*|\d{6,20})", text)
     if m:
@@ -377,9 +444,263 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
     title = " ".join(words).strip(" -,")
     if not title:
         return None, "I need a task title, e.g. /add Buy cement @Ravi fri"
-    return {"title": title, "assignee_id": assignee.id,
-            "assignee_name": assignee.name, "priority": priority,
-            "due": due.isoformat() if due else None}, None
+    draft = {"title": title, "assignee_id": assignee.id,
+             "assignee_name": assignee.name, "priority": priority,
+             "due": due.isoformat() if due else None}
+    if tag_group is not None:
+        draft["group_id"] = tag_group.id
+        draft["group_name"] = tag_group.name
+        draft["group_via_tag"] = True    # membership checked at Y-time
+    return draft, None
+
+
+# ---------------- admin commands (DM only): /nudge /nudges /adduser -------
+RE_TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
+DAY_ALIASES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4,
+               "sat": 5, "sun": 6}
+
+
+def _parse_day_token(tok: str):
+    """'mon,wed,fri' -> [0,2,4]; 'daily' -> []; else None."""
+    if tok.lower() == "daily":
+        return []
+    parts = tok.lower().split(",")
+    if all(p[:3] in DAY_ALIASES for p in parts if p):
+        return sorted({DAY_ALIASES[p[:3]] for p in parts if p})
+    return None
+
+
+def _parse_schedule_tokens(s, words):
+    """Consume leading option tokens (HH:MM, day lists, @members, #groups).
+    Returns (dict, remaining_words, error|None)."""
+    out = {"send_time": "", "days": None, "member_ids": [], "group_ids": [],
+           "recipient_names": []}
+    i = 0
+    while i < len(words):
+        w = words[i]
+        tm = RE_TIME.match(w)
+        if tm and 0 <= int(tm.group(1)) <= 23 and 0 <= int(tm.group(2)) <= 59:
+            out["send_time"] = f"{int(tm.group(1)):02d}:{tm.group(2)}"
+            i += 1
+            continue
+        days = _parse_day_token(w)
+        if days is not None:
+            out["days"] = days
+            i += 1
+            continue
+        if w.startswith("@") and len(w) > 1:
+            m = _find_member_by_ref(s, w[1:])
+            if not m:
+                return None, None, (f"I don't recognise '{w}' as a team "
+                                    "member.")
+            out["member_ids"].append(m.id)
+            out["recipient_names"].append(m.name)
+            i += 1
+            continue
+        if w.startswith("#") and len(w) > 1:
+            g, gerr = _match_group(s, w)
+            if gerr:
+                return None, None, gerr
+            out["group_ids"].append(g.id)
+            out["recipient_names"].append(g.name)
+            i += 1
+            continue
+        break
+    return out, words[i:], None
+
+
+def _nudge_summary(s, b) -> str:
+    import json as _j
+    mids, gids = _j.loads(b.member_ids or "[]"), _j.loads(b.group_ids or "[]")
+    names = ([m.name for m in s.query(Member).filter(Member.id.in_(mids))]
+             if mids else []) + \
+            ([g.name for g in s.query(Group).filter(Group.id.in_(gids))]
+             if gids else [])
+    days = _j.loads(b.days or "[]")
+    from .broadcasts import DAY_NAMES
+    sched = ("manual only" if not b.send_time else
+             f"{b.send_time} ({b.tz}) "
+             + ("every day" if not days or len(days) == 7
+                else ",".join(DAY_NAMES[d] for d in days)))
+    state = "active" if b.active else "PAUSED"
+    return f"{sched} -> {', '.join(names) or 'nobody'} [{state}]"
+
+
+def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
+    """/nudge …  - create, reschedule, on/off, delete."""
+    from .models import Broadcast
+    words = rest.split()
+    if not words:
+        return Reply(text="Usage:\n/nudge [HH:MM] [mon,wed,fri|daily] "
+                          "[@Name…] [#group…] <message>\n"
+                          "/nudge <n> <new time/days/recipients>\n"
+                          "/nudge on|off|delete <n>\n/nudges - list")
+    # --- on / off / delete <id> ---
+    if words[0].lower() in ("on", "off", "delete") and len(words) == 2 \
+            and words[1].isdigit():
+        b = s.get(Broadcast, int(words[1]))
+        if b is None:
+            return Reply(text=f"There is no nudge {words[1]}. Send /nudges.")
+        act = words[0].lower()
+        if act == "delete":
+            s.query(PendingConfirm).filter(
+                PendingConfirm.member_id == sender.id).delete()
+            s.add(PendingConfirm(member_id=sender.id,
+                  draft_json=json.dumps({"kind": "nudge_delete", "id": b.id}),
+                  expires_at=datetime.utcnow() + timedelta(minutes=10)))
+            s.flush()
+            return Reply(text=f"Delete nudge {b.id} \"{b.name}\"? "
+                              "Reply Y to confirm, N to cancel.")
+        b.active = (act == "on")
+        _reload_nudge_jobs()
+        return Reply(text=f"Nudge {b.id} \"{b.name}\" is now "
+                          + ("active." if b.active else "paused."))
+    # --- reschedule: /nudge <id> <tokens> ---
+    if words[0].isdigit():
+        b = s.get(Broadcast, int(words[0]))
+        if b is None:
+            return Reply(text=f"There is no nudge {words[0]}. Send /nudges.")
+        opts, remaining, err = _parse_schedule_tokens(s, words[1:])
+        if err:
+            return Reply(text=err)
+        if remaining:
+            return Reply(text="To change the text, delete and recreate the "
+                              "nudge (or use the dashboard). I can change "
+                              "time, days and recipients: e.g.  /nudge "
+                              f"{b.id} 08:00 tue,thu @Ravi #site")
+        changed = []
+        if opts["send_time"]:
+            b.send_time = opts["send_time"]; changed.append("time")
+        if opts["days"] is not None:
+            b.days = json.dumps(opts["days"]); changed.append("days")
+        if opts["member_ids"] or opts["group_ids"]:
+            b.member_ids = json.dumps(opts["member_ids"])
+            b.group_ids = json.dumps(opts["group_ids"])
+            changed.append("recipients")
+        if not changed:
+            return Reply(text="Nothing to change - give a time, days or "
+                              "recipients.")
+        _reload_nudge_jobs()
+        return Reply(text=f"Nudge {b.id} updated ({', '.join(changed)}):\n"
+                          + _nudge_summary(s, b))
+    # --- create ---
+    opts, remaining, err = _parse_schedule_tokens(s, words)
+    if err:
+        return Reply(text=err)
+    message = " ".join(remaining).strip()
+    if not message:
+        return Reply(text="The nudge needs a message, e.g.\n"
+                          "/nudge 07:30 mon,fri #site Good morning team")
+    if not opts["member_ids"] and not opts["group_ids"]:
+        return Reply(text="Who is it for? Add @Name members and/or a "
+                          "#group.")
+    draft = {"kind": "nudge", "message": message,
+             "member_ids": opts["member_ids"], "group_ids": opts["group_ids"],
+             "days": opts["days"] or [], "send_time": opts["send_time"],
+             "recipient_names": opts["recipient_names"]}
+    s.query(PendingConfirm).filter(
+        PendingConfirm.member_id == sender.id).delete()
+    s.add(PendingConfirm(member_id=sender.id, draft_json=json.dumps(draft),
+                         expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    s.flush()
+    from .broadcasts import DAY_NAMES
+    sched = ("manual only (fire it from the dashboard)" if not opts["send_time"]
+             else opts["send_time"] + " "
+             + ("every day" if not draft["days"] or len(draft["days"]) == 7
+                else ",".join(DAY_NAMES[d] for d in draft["days"])))
+    return Reply(text=f"Create nudge: \"{message}\"\n"
+                      f"-> {', '.join(opts['recipient_names'])}, {sched}\n"
+                      "Reply Y to confirm, N to cancel.")
+
+
+def _reload_nudge_jobs():
+    try:
+        from .scheduler import reload_broadcast_jobs
+        reload_broadcast_jobs()
+    except Exception:   # scheduler not running (tests) - jobs load on boot
+        pass
+
+
+def _confirm_nudge(s, sender: Member, draft: dict, accepted: bool) -> Reply:
+    if not accepted:
+        return Reply(text="Cancelled - no nudge created.")
+    from .db import get_setting
+    from .models import Broadcast
+    b = Broadcast(name=draft["message"][:40],
+                  message=draft["message"],
+                  member_ids=json.dumps(draft["member_ids"]),
+                  group_ids=json.dumps(draft["group_ids"]),
+                  days=json.dumps(draft["days"]),
+                  send_time=draft["send_time"],
+                  tz=get_setting(s, "timezone") or "UTC",
+                  active=True)
+    s.add(b)
+    s.flush()
+    _reload_nudge_jobs()
+    return Reply(text=f"Nudge {b.id} created:\n" + _nudge_summary(s, b)
+                      + "\nManage with /nudges.")
+
+
+def _confirm_nudge_delete(s, draft: dict, accepted: bool) -> Reply:
+    from .models import Broadcast
+    if not accepted:
+        return Reply(text="Kept - nothing deleted.")
+    b = s.get(Broadcast, draft.get("id"))
+    if b is None:
+        return Reply(text="That nudge is already gone.")
+    name = b.name
+    s.delete(b)
+    s.flush()
+    _reload_nudge_jobs()
+    return Reply(text=f"Deleted nudge \"{name}\".")
+
+
+def _handle_adduser_cmd(s, sender: Member, rest: str) -> Reply:
+    # the number may be written with spaces/+/dashes: consume phone-like
+    # tokens until the first word containing letters (= start of the name)
+    words = rest.split()
+    i, phone = 0, ""
+    while i < len(words) and re.fullmatch(r"[+\d()\-]+", words[i]):
+        phone += "".join(ch for ch in words[i] if ch.isdigit())
+        i += 1
+    name = " ".join(words[i:]).strip()
+    if not phone or not (8 <= len(phone) <= 15) or not name:
+        return Reply(text="Usage: /adduser <number with country code> <name>"
+                          "\ne.g.  /adduser 971501234567 Ravi Kumar")
+    existing = s.query(Member).filter(Member.phone == phone).first()
+    if existing and existing.active:
+        return Reply(text=f"{phone} is already registered as "
+                          f"{existing.name}.")
+    draft = {"kind": "adduser", "phone": phone, "name": name[:60],
+             "reactivate": bool(existing)}
+    s.query(PendingConfirm).filter(
+        PendingConfirm.member_id == sender.id).delete()
+    s.add(PendingConfirm(member_id=sender.id, draft_json=json.dumps(draft),
+                         expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    s.flush()
+    verb = "Re-activate" if existing else "Add"
+    return Reply(text=f"{verb} member: {draft['name']} - {phone} (role: "
+                      "member)?\nCheck the number carefully. "
+                      "Reply Y to confirm, N to cancel.")
+
+
+def _confirm_adduser(s, draft: dict, accepted: bool) -> Reply:
+    if not accepted:
+        return Reply(text="Cancelled - nobody added.")
+    existing = s.query(Member).filter(
+        Member.phone == draft["phone"]).first()
+    if existing:
+        existing.active = True
+        existing.name = draft["name"]
+        return Reply(text=f"Re-activated {existing.name} ({existing.phone}). "
+                          "They can use commands right away.")
+    m = Member(name=draft["name"], phone=draft["phone"], role="member")
+    s.add(m)
+    s.flush()
+    return Reply(text=f"Added {m.name} ({m.phone}) as a member. They can "
+                      "use commands right away; digests start once they "
+                      "have tasks. Promote to admin from the dashboard "
+                      "if needed.")
 
 
 def handle_message(s, sender: Member, body: str, admin: Member | None,
@@ -402,8 +723,26 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
             accepted = bool(RE_YES.match(body))
             if draft.get("kind") == "accept":
                 return _handle_acceptance(s, sender, draft, accepted, body)
+            if draft.get("kind") == "nudge":
+                return _confirm_nudge(s, sender, draft, accepted)
+            if draft.get("kind") == "nudge_delete":
+                return _confirm_nudge_delete(s, draft, accepted)
+            if draft.get("kind") == "adduser":
+                return _confirm_adduser(s, draft, accepted)
             if not accepted:
                 return Reply(text="Cancelled - nothing created.")
+            # tag-targeted group task: the creator must be in that group
+            if draft.get("group_via_tag") and sender.role != "admin":
+                g = s.get(Group, draft["group_id"])
+                ok = _creator_in_group(sender, g.chat_id) if g else False
+                if ok is not True:
+                    why = ("I couldn't verify that group's member list "
+                           "(hidden numbers) - ask an admin to create it, "
+                           "or make the bot's number a group admin and try "
+                           "again.") if ok is None else \
+                          "you don't appear to be a member of that group."
+                    return Reply(text="Not created - "
+                                      f"{g.name if g else 'group'}: {why}")
             assignee = s.get(Member, draft["assignee_id"])
             t = create_task(
                 s, title=draft["title"], assignee=assignee, creator=sender,
@@ -411,7 +750,8 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
                 due_date=date.fromisoformat(draft["due"]) if draft["due"] else None,
                 post_to_group_id=draft.get("group_id"),
                 channel="whatsapp", raw_text=body)
-            return _created_reply(s, t, sender, assignee)
+            return _created_reply(s, t, sender, assignee,
+                                  announce=bool(draft.get("group_via_tag")))
 
     # ---- numbered status update: "1 done", "12. block stuck on X" ----
     m = RE_STATUS.match(body)
@@ -453,8 +793,10 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
         draft, err = _parse_add(s, m.group(1), sender)
         if err:
             return Reply(text=err)
-        if group_id is not None:
-            draft["group_id"] = group_id   # created in a group -> posts there
+        if group_id is not None:           # created in a group -> posts there
+            draft["group_id"] = group_id   # (context beats any #tag)
+            draft.pop("group_via_tag", None)
+            draft.pop("group_name", None)
         s.query(PendingConfirm).filter(
             PendingConfirm.member_id == sender.id).delete()
         s.add(PendingConfirm(member_id=sender.id, draft_json=json.dumps(draft),
@@ -463,12 +805,63 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
         due_txt = (f", due {date.fromisoformat(draft['due']):%a %d %b}"
                    if draft["due"] else "")
         pr_txt = f", {draft['priority']} priority" if draft["priority"] != "medium" else ""
+        grp_txt = (f", announced in {draft['group_name']}"
+                   if draft.get("group_via_tag") else "")
         return Reply(text=f"Create task: \"{draft['title']}\" -> "
-                          f"{draft['assignee_name']}{due_txt}{pr_txt}?\n"
+                          f"{draft['assignee_name']}{due_txt}{pr_txt}{grp_txt}?\n"
                           "Reply Y to confirm, N to cancel.")
 
     # ---- queries ----
     low = body.lower()
+
+    # ---- admin commands: DM only, admin only ----
+    if (low.startswith("/nudge") or low.startswith("/adduser")
+            or low.startswith("/members")):
+        if is_group:
+            return Reply(unmatched=True)   # never discussed in groups
+        if sender.role != "admin":
+            return Reply(text="That's an admin command.")
+        if low.startswith("/nudges"):
+            from .models import Broadcast
+            rows = s.query(Broadcast).order_by(Broadcast.id).all()
+            if not rows:
+                return Reply(text="No nudges yet. Create one:\n/nudge 07:30 "
+                                  "mon,fri #site Good morning team")
+            lines = [f"{b.id}. \"{b.name}\"\n   " + _nudge_summary(s, b)
+                     for b in rows]
+            return Reply(text="*Nudges:*\n" + "\n".join(lines)
+                              + "\n\n/nudge on|off|delete <n> - manage\n"
+                                "/nudge <n> <time/days/@/#> - reschedule")
+        if low.startswith("/nudge"):
+            return _handle_nudge_cmd(s, sender, body[6:].strip())
+        if low.startswith("/adduser"):
+            return _handle_adduser_cmd(s, sender, body[8:].strip())
+        # /members
+        members = (s.query(Member).order_by(Member.name).all())
+        lines = [f"- {m.name} ({m.phone})"
+                 + (" - admin" if m.role == "admin" else "")
+                 + ("" if m.active else " [inactive]") for m in members]
+        return Reply(text="*Members:*\n" + "\n".join(lines))
+
+    # ---- /myadd: open tasks I created ----
+    if low.startswith("/myadd"):
+        rows = (s.query(Task)
+                 .filter(Task.creator_id == sender.id,
+                         Task.status.in_(("open", "in_progress", "blocked")))
+                 .all())
+        rows = [t for t in sort_tasks(rows) if t.assignee_id != sender.id]
+        if not rows:
+            return Reply(text="No open tasks created by you for others.")
+        lines = []
+        for t in rows:
+            due = f", due {t.due_date:%a %d %b}" if t.due_date else ""
+            st_ = (f"BLOCKED {t.blocked_days}d: {t.blocker_reason}"
+                   if t.status == "blocked" else t.status.replace("_", " "))
+            lines.append(f"#{t.id} {t.title} -> {t.assignee.name} "
+                         f"({st_}{due})")
+        n = rows[0].id
+        return Reply(text="*Tasks you created (open):*\n" + "\n".join(lines)
+                          + f"\n\nReply:  {n} done  |  {n} cancel <reason>")
     if low.startswith("/mytasks"):
         tasks = open_tasks_for(s, sender)
         if not tasks:
@@ -487,7 +880,9 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
         lines = [f"#{t.id} {_task_body(t)} ({t.assignee.name})" for t in tasks]
         return Reply(text="*Open tasks:*\n" + "\n".join(lines))
     if low.startswith("/help"):
-        return Reply(text=HELP_TEXT)
+        return Reply(text=HELP_TEXT
+                     + (ADMIN_HELP if sender.role == "admin" and not is_group
+                        else ""))
 
     # ---- unmatched: ordinary conversation, not a command ----
     return Reply(text="I didn't understand that. Send /help for the command list.",

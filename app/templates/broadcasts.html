@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Broadcasts{% endblock %}
+{% block title %}Nudger{% endblock %}
 {% block content %}
-<h1>Broadcasts</h1>
+<h1>Nudger</h1>
 <p class="muted">Plain messages, sent exactly as typed — no numbering, no
-   reply footer. Recipients see an ordinary WhatsApp message. Sends are spaced
+   reply footer: polite nudging without seeming like an assigned task.
+   Recipients and groups see an ordinary WhatsApp message. Sends are spaced
    20–45 seconds apart and never overlap other TaskWA sends.</p>
 {% if sent %}
 <div class="banner ok">Sending in the background — watch the message log on
@@ -39,19 +40,19 @@
         </form>
         <a href="/broadcasts?edit={{ bc.id }}"><button type="button" class="ghost">Edit</button></a>
         <form method="post" action="/broadcasts/{{ bc.id }}/delete" class="inline-form"
-              onsubmit="return confirm('Delete this broadcast?')">
+              onsubmit="return confirm('Delete this nudge?')">
           <button class="danger">Delete</button>
         </form>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted">No broadcasts yet — create one below.</td></tr>
+    <tr><td colspan="6" class="muted">No nudges yet — create one below.</td></tr>
     {% endfor %}
   </table>
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0">{{ 'Edit broadcast' if b else 'New broadcast' }}</h2>
+  <h2 style="margin-top:0">{{ 'Edit nudge' if b else 'New nudge' }}</h2>
   <form method="post" action="/broadcasts/save">
     <input type="hidden" name="id" value="{{ b.id if b else 0 }}">
     <div class="grid">
@@ -59,7 +60,7 @@
         <input name="name" value="{{ b.name if b else '' }}" required></div>
       <div><label>Send time (24h) — leave empty for manual-only</label>
         <input type="time" name="send_time" value="{{ b.send_time if b else '' }}"></div>
-      <div><label>Time zone (pinned to this broadcast)</label>
+      <div><label>Time zone (pinned to this nudge)</label>
         {% set sel = (b.tz if b and b.tz else tz_default) %}
         <select name="tz">
           <optgroup label="Common">
@@ -73,7 +74,7 @@
             {% endfor %}
           </optgroup>
         </select>
-        <p class="muted">Saved with the broadcast — changing the dashboard
+        <p class="muted">Saved with the nudge — changing the dashboard
            timezone later never moves this schedule.</p></div>
     </div>
     <label>Days (none ticked = every day, when a time is set)</label>
@@ -114,11 +115,11 @@
         <p class="muted">Pause instead of deleting to keep the text for later.</p>
       </div>
     </div>
-    <br><button>{{ 'Save changes' if b else 'Create broadcast' }}</button>
+    <br><button>{{ 'Save changes' if b else 'Create nudge' }}</button>
     {% if b %}<a href="/broadcasts"><button type="button" class="ghost">Cancel</button></a>{% endif %}
   </form>
   <p class="muted">To DM someone who isn't on the task team, register them on
      the <a href="/members">Members page</a> first — members with no tasks
-     never receive digests, so they'll only ever get your broadcasts.</p>
+     never receive digests, so they'll only ever get your nudges.</p>
 </div>
 {% endblock %}

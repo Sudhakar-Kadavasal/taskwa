@@ -280,9 +280,34 @@ E.append(table(["Symptom", "Fix"],
      ["Locked out of dashboard", "'Forgot password' sends a code to the admin's WhatsApp. "
       "Gateway down too: docker compose exec app python -m app.cli reset-password"]],
     [FW*0.38, FW*0.62]))
+E.append(Spacer(1, 6))
+E.append(P("<b>The restart cookbook</b> — from the install folder; none of these "
+           "lose data (database, backups and the WhatsApp pairing live in "
+           "<font face='Mono'>data/</font> and survive):"))
+E.append(codebox([
+ "docker compose restart waha        # gateway stuck / QR problems",
+ "docker compose restart app         # dashboard misbehaving",
+ "docker compose down && docker compose up -d    # full clean restart",
+ "docker compose logs app --since 30m            # what actually happened",
+ "",
+ "# Docker itself wedged: quit Docker Desktop (whale menu), reopen,",
+ "# wait for the steady whale, then:  docker compose up -d",
+]))
+E.append(Spacer(1, 4))
+E.append(P("<b>Check the autostart is armed</b> (it is what brings everything "
+           "back after reboots and power cuts): macOS "
+           "<font face='Mono'>launchctl list | grep taskwa</font> should print a "
+           "line — if not, re-run <font face='Mono'>./scripts/autostart-macos.sh"
+           "</font> (log: <font face='Mono'>/tmp/taskwa-autostart.log</font>). "
+           "Also confirm Docker Desktop's 'Start when you sign in' is ON, "
+           "automatic login is enabled, and on a Mac run <font face='Mono'>sudo "
+           "pmset -a autorestart 1</font> once. 'docker: command not found' "
+           "after switching container engines: Docker Desktop → Settings → "
+           "Advanced → toggle CLI tools User → System (password prompt). "
+           "Never run two container engines at once."))
 E.append(Spacer(1, 4))
 E.append(P("Full operational reference: <b>docs/TROUBLESHOOTING.md</b>, <b>docs/UPGRADE.md</b>, "
-           "<b>docs/BACKUP.md</b> and the User Manual in this folder."))
+           "<b>docs/BACKUP.md</b>, <b>docs/UNATTENDED.md</b> and the User Manual in this folder."))
 
 doc.build(E)
 print("OK install")
@@ -344,20 +369,23 @@ for cmd, desc in [
   "its owner."),
  ("1 reopen", "Undo a mistaken 'done'."),
  ("done", "No number needed if you have just one task — or swipe-reply on the task's message."),
- ("/add Fix pump @Ravi fri !high", "New task for Ravi, due Friday, high priority. "
-  "Reply Y to the confirmation — Ravi is then asked to accept it."),
+ ("/add Fix pump @Ravi #site fri !high", "New task for Ravi, due Friday, high "
+  "priority; #site also posts + announces it in the matching group. Reply Y to "
+  "confirm — Ravi is then asked to accept it."),
  ("Y  /  N", "Got a 'New task from …'? Y accepts, N sends it back to its creator. "
   "Silence for 30 min = accepted."),
  ("1 cancel <i>reason</i>", "Cancel a task YOU created (or you're admin). "
   "The assignee is told it's off their list."),
  ("/mytasks", "Your open tasks, any time."),
- ("/help", "The full command list."),
+ ("/myadd", "Open tasks you created for others — with status and blocks."),
+ ("/help", "The full command list (admins DM'ing the bot also get the admin set)."),
 ]:
     C += big_cmd(cmd, desc)
 
 C.append(Spacer(1, 6))
 C.append(callout("Dates for /add: <b>today · tomorrow · mon…sun · 25/07</b>   —   "
                  "Priorities: <b>!high · !low</b>   —   Only you (or an admin) can close "
-                 "your tasks."))
+                 "your tasks.   —   Admins: DM the bot <b>/nudge · /nudges · "
+                 "/adduser · /members</b> (see the User Manual)."))
 cdoc.build(C)
 print("OK card")

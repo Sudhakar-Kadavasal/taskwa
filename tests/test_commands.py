@@ -378,6 +378,168 @@ def test_uninvolved_member_still_refused(s, team):
     assert s.get(Task, t.id).status == "open"
 
 
+# ------- v1.6.4: #group tag, /nudge, /adduser, /myadd, role help -------
+import app.commands as C
+from app.models import Broadcast, Group
+
+
+@pytest.fixture()
+def grp(s):
+    g = Group(name="Site B Construction", chat_id="120363555@g.us")
+    g2 = Group(name="Site Office", chat_id="120363556@g.us")
+    s.add_all([g, g2]); s.commit()
+    return g, g2
+
+
+def test_add_with_group_tag_announces_on_y(s, team, grp, monkeypatch):
+    admin, ravi, _ = team
+    g, _g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    r = handle_message(s, admin, "/add Fix the pump @Ravi #site.b fri", admin)
+    assert "announced in Site B Construction" in r.text
+    r2 = handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.post_to_group_id == g.id
+    assert "Announced in Site B Construction" in r2.text
+    assert len(r2.extra_sends) == 1
+    cid, txt = r2.extra_sends[0]
+    assert cid == g.chat_id
+    assert "New task for Ravi" in txt and f"{t.id} done" in txt
+
+
+def test_add_group_tag_ambiguous_refused(s, team, grp):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/add Fix pump @Ravi #site", admin)
+    assert "matches several groups" in r.text
+    assert s.query(Task).count() == 0
+
+
+def test_add_group_tag_membership_enforced(s, team, grp, monkeypatch):
+    admin, ravi, priya = team
+    g, _ = grp
+    # priya (member) is NOT in the group - verified absence
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: False)
+    handle_message(s, priya, "/add Order rebar @Ravi #site.b", admin)
+    r = handle_message(s, priya, "y", admin)
+    assert "Not created" in r.text
+    assert s.query(Task).count() == 0
+    # unverifiable -> refused with hint
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: None)
+    handle_message(s, priya, "/add Order rebar @Ravi #site.b", admin)
+    r2 = handle_message(s, priya, "y", admin)
+    assert "couldn't verify" in r2.text
+    # admins bypass the check entirely
+    monkeypatch.setattr(C, "_creator_in_group",
+                        lambda m, cid: (_ for _ in ()).throw(AssertionError))
+    handle_message(s, admin, "/add Order rebar @Ravi #site.b", admin)
+    r3 = handle_message(s, admin, "y", admin)
+    assert "Created task #" in r3.text
+
+
+def test_nudge_create_flow(s, team, grp):
+    admin, ravi, _ = team
+    g, _g2 = grp
+    r = handle_message(s, admin,
+                       "/nudge 07:30 mon,wed,fri @Ravi #site.b "
+                       "Good morning - plan for {day}?", admin)
+    assert "Create nudge" in r.text and "07:30" in r.text
+    assert "Ravi" in r.text and "Site B Construction" in r.text
+    r2 = handle_message(s, admin, "y", admin)
+    assert "created" in r2.text
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    assert b.send_time == "07:30" and b.active
+    import json as _jj
+    assert _jj.loads(b.days) == [0, 2, 4]
+    assert ravi.id in _jj.loads(b.member_ids)
+    assert g.id in _jj.loads(b.group_ids)
+    assert b.tz   # pinned at creation
+
+
+def test_nudge_manage_and_reschedule(s, team, grp):
+    admin, _, _ = team
+    handle_message(s, admin, "/nudge 07:30 daily #site.b Hello", admin)
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).first()
+    # list
+    r = handle_message(s, admin, "/nudges", admin)
+    assert f"{b.id}." in r.text and "07:30" in r.text
+    # pause / resume (no Y/N - reversible)
+    handle_message(s, admin, f"/nudge off {b.id}", admin)
+    assert not s.get(Broadcast, b.id).active
+    handle_message(s, admin, f"/nudge on {b.id}", admin)
+    assert s.get(Broadcast, b.id).active
+    # reschedule keeps text
+    r2 = handle_message(s, admin, f"/nudge {b.id} 08:15 tue,thu", admin)
+    assert "updated" in r2.text
+    assert s.get(Broadcast, b.id).send_time == "08:15"
+    # delete needs Y
+    handle_message(s, admin, f"/nudge delete {b.id}", admin)
+    r3 = handle_message(s, admin, "y", admin)
+    assert "Deleted" in r3.text
+    assert s.query(Broadcast).count() == 0
+
+
+def test_nudge_requires_recipients_and_message(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/nudge 07:30 mon Hello there", admin)
+    assert "Who is it for" in r.text
+    r2 = handle_message(s, admin, "/nudge 07:30 mon @Ravi", admin)
+    assert "needs a message" in r2.text
+
+
+def test_admin_commands_refused_for_members_and_groups(s, team):
+    admin, ravi, _ = team
+    r = handle_message(s, ravi, "/nudge 07:30 @Priya Hello", admin)
+    assert "admin command" in r.text
+    r2 = handle_message(s, admin, "/nudges", admin, is_group=True, group_id=1)
+    assert r2.unmatched and not r2.text is None or r2.unmatched
+    r3 = handle_message(s, ravi, "/adduser 971509999999 New Guy", admin)
+    assert "admin command" in r3.text
+
+
+def test_adduser_flow_and_reactivate(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/adduser +971 50 999 8877 Dillon M", admin)
+    assert "Dillon M" in r.text and "971509998877" in r.text
+    r2 = handle_message(s, admin, "y", admin)
+    assert "Added Dillon M" in r2.text
+    m = s.query(Member).filter(Member.phone == "971509998877").first()
+    assert m and m.active and m.role == "member"
+    # duplicate refused
+    r3 = handle_message(s, admin, "/adduser 971509998877 Dillon M", admin)
+    assert "already registered" in r3.text
+    # deactivate then re-add -> reactivate
+    m.active = False; s.flush()
+    handle_message(s, admin, "/adduser 971509998877 Dillon M", admin)
+    r4 = handle_message(s, admin, "y", admin)
+    assert "Re-activated" in r4.text
+    assert s.query(Member).filter(Member.phone == "971509998877").count() == 1
+
+
+def test_myadd_lists_created_tasks(s, team):
+    admin, ravi, priya = team
+    handle_message(s, priya, "/add Fix pump @Ravi", admin)
+    handle_message(s, priya, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    r = handle_message(s, priya, "/myadd", admin)
+    assert f"#{t.id} Fix pump -> Ravi" in r.text
+    assert f"{t.id} cancel" in r.text
+    r2 = handle_message(s, ravi, "/myadd", admin)
+    assert "No open tasks created by you" in r2.text
+
+
+def test_help_is_role_aware(s, team):
+    admin, ravi, _ = team
+    r_member = handle_message(s, ravi, "/help", admin)
+    r_admin = handle_message(s, admin, "/help", admin)
+    assert "/nudge" not in r_member.text
+    assert "/myadd" in r_member.text
+    assert "/nudge" in r_admin.text and "/adduser" in r_admin.text
+    # in a group even the admin gets only the member help
+    r_grp = handle_message(s, admin, "/help", admin, is_group=True, group_id=1)
+    assert "/adduser" not in r_grp.text
+
+
 # ---------------- queries ----------------
 def test_mytasks_and_list(s, team):
     admin, ravi, _ = team

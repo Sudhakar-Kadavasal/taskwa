@@ -59,15 +59,33 @@ page instead of being sent. Flip it off in Settings when you're ready.
 | `1 done` | close task 1 from your digest (bot reacts 👍) |
 | `1 in progress` | mark started |
 | `1 block waiting on quote` | blocked + reason; admin alerted instantly |
+| `1 block waiting on @Priya` | hand the block to Priya — she's asked to release it when her part is done |
+| `1 unblock` | a block waits on YOU? release it; the task returns to its owner |
 | `1 reopen` | undo a mistaken done |
+| `1 cancel <reason>` | cancel a task you created (creator/admin only) |
 | `done` / `block <reason>` | no number needed if you have one open task, or swipe-reply on a task message |
-| `/add Buy cement @Ravi fri !high` | create a task (bot asks Y/N to confirm) |
+| `/add Buy cement @Ravi #site fri !high` | create a task (Y/N confirm); `#site` posts + announces it in the matching group |
+| `Y` / `N` | accept a task created for you — or decline it back to its creator (silence 30 min = accepted) |
 | `/mytasks` | your open tasks, on demand |
+| `/myadd` | open tasks you created for others, with status |
 | `/list` | all open tasks (admins see everyone's) |
-| `/help` | command reference |
+| `/help` | command reference (role-aware — admins also get the admin set) |
 
-Only the assignee or an admin can change a task's status. Serial numbers are
-global and never reused.
+Assignees update their own tasks; admins can update anyone's; a task's
+creator can close or cancel it. New tasks reach the assignee immediately
+with an accept/decline prompt. Serial numbers are global and never reused.
+
+## The Nudger — plain messages, no task machinery
+
+Scheduled or on-demand messages sent **exactly as you type them** — no
+numbering, no reply footer: polite nudging without seeming like an assigned
+task. Per-nudge weekday/time schedule with its own pinned timezone,
+{date}/{day} placeholders, and 20–45 s pacing between recipients.
+
+Admins manage it all without the dashboard, by DM'ing the bot:
+`/nudge 07:30 mon,fri #site Good morning team` creates one (Y/N confirmed);
+`/nudges` lists; `/nudge on|off|delete <n>` and `/nudge <n> <new schedule>`
+manage. `/adduser <number> <name>` registers a member; `/members` lists them.
 
 ## Groups
 
@@ -75,8 +93,10 @@ Add the bot's number to a WhatsApp group, click "Detect my groups" on the
 Groups page, then flag any task "post to group". Group tasks appear in one
 daily group summary — numbered like personal digests, with the same reply
 footer — and are not repeated in the assignee's DM. Replies in the group
-(`1 done`) resolve against the group's own numbers; only the assignee or an
-admin can update a task.
+(`1 done`) resolve against the group's own numbers.
+
+**Onboarding a team?** Members → *Import from group* lists every participant
+of a registered group with name and number pre-filled — tick, adjust, import.
 
 ## Using your personal number instead of a dedicated SIM
 
@@ -110,7 +130,12 @@ personal account. A ban would cost you your own WhatsApp, not a spare SIM.
 
 ## Roadmap
 
-- **v1.1** — recurring tasks, overdue escalation, weekly admin summary, quiet hours
+Shipped since v1.0 (see `CHANGELOG.md`): the Nudger, instant assignee
+accept/decline, person-level block handoff, creator close/cancel, group
+member import, per-nudge timezones, unattended autostart.
+
+- **Next** — recurring tasks, blocker-aging escalation, weekly admin summary,
+  quiet hours
 - **v2.0** — AI task creation from free-text WhatsApp messages via a local LLM
   (Ollama profile is already in `docker-compose.yml`), optional cloud API key
 
