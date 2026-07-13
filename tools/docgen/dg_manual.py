@@ -76,7 +76,7 @@ E.append(P("Send /add with a title. Mention someone to assign it to them; add "
            "<font face='Mono'>!high</font> or <font face='Mono'>!low</font> for priority; "
            "add <font face='Mono'>#group</font> to post it to a registered group "
            "(any part of the group's name works — <font face='Mono'>#site</font> finds "
-           "'Site B Construction'; dots stand for spaces); "
+           "'Site B Construction'; for a space, dot it or quote it — next section); "
            "end with a date word — today, tomorrow, fri, or 25/07:"))
 E.append(chat_bubble(["/add Send Q2 invoice @Priya fri !high"], sender="me", width=FW*0.6))
 E.append(chat_bubble(['Create task: "Send Q2 invoice" -> Priya,',
@@ -95,6 +95,38 @@ E.append(P("<b>Created it with a #group tag?</b> On your Y the bot posts one "
 E.append(P("<b>Track what you've delegated:</b> send <font face='Mono-Bold'>/myadd"
            "</font> — every open task you created for someone else, with its status, "
            "age of any block, and the reminder that you can close or cancel each one."))
+
+E.append(P("Names with a space — dot it or quote it", "h2"))
+E.append(P("WhatsApp doesn't tell the bot where a typed name ends, so a name with a "
+           "space needs one of two marks: a <b>dot in place of the space</b>, or "
+           "<b>quotes around the whole name</b>. Both work everywhere a name or a "
+           "group can appear — <font face='Mono'>/add</font>, "
+           "<font face='Mono'>/nudge</font>, and <font face='Mono'>block waiting on</font>."))
+E.append(table(["You type", "Who it means"],
+    [[Paragraph("<font face='Mono-Bold'>@Ravi.Shankar</font>", S["tcell"]),
+      "Ravi Shankar. The dot stands for the space — shortest to type, never "
+      "ambiguous."],
+     [Paragraph("<font face='Mono-Bold'>@\"Ravi Shankar\"</font>", S["tcell"]),
+      "The same person, written naturally. Your phone's curly quotes "
+      "(<font face='Mono'>“ ”</font>) are understood too — you don't have to fight "
+      "autocorrect."],
+     [Paragraph("<font face='Mono-Bold'>@Ravi</font>", S["tcell"]),
+      "Also Ravi Shankar, as long as no one else on the team starts with 'Ravi'. "
+      "If it's ambiguous the bot says so rather than guessing."],
+     [Paragraph("<font face='Mono-Bold'>@Ravi Shankar</font>", S["tcell"]),
+      "Understood as well — the bot joins the words back into a name. It works, but "
+      "the dot or the quotes are the forms that can never be misread."],
+     [Paragraph("<font face='Mono-Bold'>#site.b</font>  ·  "
+                "<font face='Mono-Bold'>#\"Site B\"</font>  ·  "
+                "<font face='Mono-Bold'>#Site B</font>", S["tcell"]),
+      "The group 'Site B Construction'. Groups follow exactly the same three rules "
+      "as names — dot, quotes, or plain spaces — and any unique part of the group's "
+      "name is enough. If the tag matches two groups the bot asks you to be more "
+      "specific rather than guessing."]],
+    [4.3*cm, FW-4.3*cm]))
+E.append(Spacer(1, 4))
+E.append(P("Tapping WhatsApp's own @-mention picker always works as well — the bot "
+           "resolves the number behind it."))
 
 E.append(P("When a task is created FOR you", "h2"))
 E.append(P("The moment someone assigns you a task, you get a message — no waiting for "
@@ -222,11 +254,14 @@ E.append(P("Admins can run the essentials from their phone by <b>DM'ing the bot 
            "refused for non-admins; anything that creates or deletes asks Y/N "
            "first. No AI involved — fixed wording, options first, message last."))
 E.append(table(["Command", "What it does"],
-    [[Paragraph("<font face='Mono-Bold'>/nudge 07:30 mon,wed,fri #site "
-                "Good morning - plan for {day}?</font>", S["tcell"]),
-      "Create a nudge: time (24h, else manual-only), days (or 'daily' / "
-      "omit = every day), @Name members and #group targets, then the "
-      "message, sent verbatim. Timezone pins to the dashboard setting."],
+    [[Paragraph("<font face='Mono-Bold'>/nudge 07:30 tue @Ravi.Shankar #site "
+                "What is the status?</font>", S["tcell"]),
+      "Create a nudge: the time (24h) is <b>required</b> — without one the bot "
+      "asks for it rather than creating a nudge that never fires. Then days "
+      "(or 'daily' / omit = every day), @Name members and #group targets, then "
+      "the message, sent verbatim. <b>A name with a space is dotted or quoted</b> "
+      "— @Ravi.Shankar or @\"Ravi Shankar\". Timezone pins to the dashboard "
+      "setting. Manual-only nudges (no time) can still be made on the dashboard."],
      [Paragraph("<font face='Mono-Bold'>/nudges</font>", S["tcell"]),
       "Numbered list of every nudge with schedule, recipients and "
       "active/paused state."],

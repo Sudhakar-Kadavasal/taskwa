@@ -360,31 +360,40 @@ def big_cmd(cmd, desc):
 
 
 for cmd, desc in [
- ("1 done", "Task 1 finished. You'll get a thumbs-up."),
- ("1 in progress", "You've started task 1."),
- ("1 block <i>reason</i>", "You're stuck — say why. The admin is alerted at once."),
- ("1 block waiting on @Priya", "Hand the block to Priya — she's asked to release it "
-  "when her part is done."),
- ("1 unblock", "A block waits on YOU? This releases it and hands the task back to "
-  "its owner."),
- ("1 reopen", "Undo a mistaken 'done'."),
- ("done", "No number needed if you have just one task — or swipe-reply on the task's message."),
+ # --- slash commands first ---
  ("/add Fix pump @Ravi #site fri !high", "New task for Ravi, due Friday, high "
   "priority; #site also posts + announces it in the matching group. Reply Y to "
   "confirm — Ravi is then asked to accept it."),
- ("Y  /  N", "Got a 'New task from …'? Y accepts, N sends it back to its creator. "
-  "Silence for 30 min = accepted."),
- ("1 cancel <i>reason</i>", "Cancel a task YOU created (or you're admin). "
-  "The assignee is told it's off their list."),
  ("/mytasks", "Your open tasks, any time."),
  ("/myadd", "Open tasks you created for others — with status and blocks."),
  ("/help", "The full command list (admins DM'ing the bot also get the admin set)."),
+ # --- names with spaces ---
+ ("@Ravi.Shankar<br/>@\"Ravi Shankar\"", "A name with a space: <b>dot it, or "
+  "quote it</b> — curly quotes from your phone are fine. <b>Groups work exactly "
+  "the same</b> (#site.b or #\"Site B\"). @Ravi or #site on their own are fine "
+  "when they match only one person / one group."),
+ # --- status replies ---
+ ("1 done", "Task 1 finished. You'll get a thumbs-up."),
+ ("1 in progress", "You've started task 1."),
+ ("1 block <i>reason</i>", "You're stuck — say why. The admin is alerted at once."),
+ ("1 block waiting on @Ravi.Shankar", "Hand the block to Ravi — he's asked to "
+  "release it when his part is done."),
+ ("1 unblock", "A block waits on YOU? This releases it and hands the task back to "
+  "its owner."),
+ ("1 reopen", "Undo a mistaken 'done'."),
+ ("1 cancel <i>reason</i>", "Cancel a task YOU created (or you're admin). "
+  "The assignee is told it's off their list."),
+ ("done", "No number needed if you have just one task — or swipe-reply on the task's message."),
+ ("Y  /  N", "Got a 'New task from …'? Y accepts, N sends it back to its creator. "
+  "Silence for 30 min = accepted."),
 ]:
     C += big_cmd(cmd, desc)
 
 C.append(Spacer(1, 6))
 C.append(callout("Dates for /add: <b>today · tomorrow · mon…sun · 25/07</b>   —   "
-                 "Priorities: <b>!high · !low</b>   —   Only you (or an admin) can close "
+                 "Priorities: <b>!high · !low</b>   —   A space in a name: dot it "
+                 "<b>@Ravi.Shankar</b> or quote it <b>@\"Ravi Shankar\"</b>   —   "
+                 "Only you (or an admin) can close "
                  "your tasks.   —   Admins: DM the bot <b>/nudge · /nudges · "
                  "/adduser · /members</b> (see the User Manual)."))
 cdoc.build(C)

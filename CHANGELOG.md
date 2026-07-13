@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.6.5 — 2026-07-13
+
+- **Fix: names with a space broke `/nudge` and `/add`.** `@Ravi shankar
+  7:30 Tue …` stopped the option parser dead at `shankar`, so the time and
+  days fell into the message body and the nudge was created with no
+  schedule — it never fired. Two changes: a **dot now stands for a space in
+  an @name** (`@Ravi.Shankar`), exactly as it already did for `#group.tags`;
+  and an unquoted spaced name (`@Ravi shankar`) is resolved by greedily
+  joining the following words (longest match wins, never across a time, day,
+  `@`, `#` or `!` token). A unique prefix (`@Ravi`) still works, and an
+  exact match always beats a longer one. Applies to `/add` too, where the
+  surname used to be silently left in the task title.
+- **Quoted names and groups as a second accepted form:** `@"Ravi Shankar"`
+  and `#"Site B"` work anywhere a name or group can appear (`/add`,
+  `/nudge`, `block waiting on`). Any quote glyph opens and any closes —
+  phone keyboards curl quotes, and curl them the *wrong* way often enough
+  (a pasted or space-preceded quote arrives as `”`, not `“`) that demanding
+  a matched pair failed silently and dumped the raw tag into the task title.
+  Normalised to the dotted form once at the dispatcher, so every command
+  path gets it. Quotes elsewhere in a title or nudge body are untouched.
+- **`#group` tags now resolve greedily too**, symmetric with `@names`:
+  `#De Leadership team` (no dot, no quotes) works — longest run that matches
+  exactly one group wins, never crossing a time/day/`@`/`#`/`!` token.
+  Ambiguous tags are still refused, not guessed.
+- **Fix: the block hand-off ignored dotted names.** `block waiting on
+  @Ravi.Shankar` matched on `@(\w+)` — which stops at the dot — and handed
+  the block to whoever `@Ravi` resolved to. Now uses the same resolver as
+  everything else.
+- **Fix: a nudge with no time is now refused.** `/nudge` over WhatsApp used
+  to accept a missing time and quietly create a manual-only nudge that
+  never fires. It now asks for the time. (Manual-only nudges are still
+  creatable on the dashboard, where the intent is explicit.)
+- **`/help` restructured:** all `/commands` first, then the spaced-name
+  rule (dot or quotes) with examples, then the status replies (done / in
+  progress / block / unblock / reopen / cancel). Unknown-name and ambiguous
+  -group errors now show both forms.
+- Command Card and User Manual regenerated: slash commands lead the card, a
+  "Names with a space — dot it or quote it" section added to the manual, and
+  the `/nudge` row now states that the time is required.
+- 89 tests (18 new regression tests covering the bugs above).
+
 ## v1.6.4 — 2026-07-13
 
 - **Admin commands over WhatsApp (DM the bot only, Y/N confirmed, no AI —

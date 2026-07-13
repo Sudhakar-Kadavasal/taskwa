@@ -24,33 +24,43 @@ from .models import Group, Member, PendingConfirm, StatusEvent, Task
 
 HELP_TEXT = (
     "*Task bot - commands*\n"
-    "1 done - close task 1 (your digest number)\n"
-    "1 in progress - mark started\n"
-    "1 block <reason> - report a blocker (alerts admin)\n"
-    "1 block waiting on @Name - hand the block to that person\n"
-    "1 unblock - release a block that waits on you\n"
-    "1 reopen - undo a mistaken 'done'\n"
-    "1 cancel - cancel a task you created (creator/admin only)\n"
-    "Y / N - accept a new task, or decline it back to its creator\n"
-    "Just 'done' works if you have a single open task,\n"
-    "or swipe-reply on a task message and type 'done'.\n"
     "/add <title> @Name [#group] [!high|!low] [today|fri|25/07]\n"
     "   #group posts + announces it in that group\n"
     "/mytasks - your open tasks\n"
     "/myadd - open tasks you created for others\n"
     "/list - open tasks you can see\n"
-    "/help - this message"
+    "/help - this message\n"
+    "\n"
+    "*Names with a space - dot it, or quote it*\n"
+    "@Ravi.Shankar   - a dot stands for the space\n"
+    "@\"Ravi Shankar\"   - quotes work too\n"
+    "#site.b or #\"Site B\"   - same for group names\n"
+    "@Ravi alone is fine when it matches one person.\n"
+    "\n"
+    "*Task updates* - 1 is your digest number\n"
+    "1 done - close task 1\n"
+    "1 in progress - mark started\n"
+    "1 block <reason> - report a blocker (alerts admin)\n"
+    "1 block waiting on @Ravi.Shankar - hand the block over\n"
+    "1 unblock - release a block that waits on you\n"
+    "1 reopen - undo a mistaken 'done'\n"
+    "1 cancel - cancel a task you created (creator/admin only)\n"
+    "Y / N - accept a new task, or decline it back to its creator\n"
+    "Just 'done' works if you have a single open task,\n"
+    "or swipe-reply on a task message and type 'done'."
 )
 
 ADMIN_HELP = (
     "\n\n*Admin (DM the bot only)*\n"
-    "/nudge [HH:MM] [mon,wed,fri|daily] [@Name] [#group] <message>\n"
+    "/nudge <HH:MM> [mon,wed,fri|daily] [@Name] [#group] <message>\n"
     "   - schedule a plain message (Nudger)\n"
     "/nudge <n> <time/days/@/#> - reschedule nudge n\n"
     "/nudge on|off|delete <n>\n"
     "/nudges - list all nudges\n"
     "/adduser <number> <name> - register a member\n"
-    "/members - list registered members"
+    "/members - list registered members\n"
+    "e.g. /nudge 07:30 tue @Ravi.Shankar What is the status\n"
+    "     /nudge 07:30 tue @\"Ravi Shankar\" What is the status"
 )
 
 VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock|cancel(?:led)?)"
@@ -251,6 +261,26 @@ def _created_reply(s, t: Task, sender: Member, assignee: Member,
     return Reply(text=base)
 
 
+# Quoted @names / #groups: @"Ravi Shankar" -> @Ravi.Shankar
+# Any quote character opens, any quote character closes: phone keyboards curl
+# quotes, and they get curled the WRONG way often enough (a pasted or
+# space-preceded quote comes out as ” not “) that insisting on a matched pair
+# would fail silently on real messages. Treat them all as one class.
+QUOTES = "\"'`“”‘’«»"
+RE_QUOTED_REF = re.compile(
+    rf"([@#])\s*[{QUOTES}]\s*([^{QUOTES}]+?)\s*[{QUOTES}]")
+
+
+def _dequote_refs(text: str) -> str:
+    """Normalise the quoted form to the dotted form, so the rest of the parser
+    keeps seeing one token: @"Ravi Shankar" / @“Ravi Shankar” -> @Ravi.Shankar,
+    #"Site B Construction" -> #Site.B.Construction. Straight and curly quotes
+    both work - phone keyboards curl them automatically. Quotes anywhere else
+    in the message (a task title, a nudge body) are left untouched."""
+    return RE_QUOTED_REF.sub(
+        lambda m: m.group(1) + re.sub(r"\s+", ".", m.group(2).strip()), text)
+
+
 def _match_group(s, token: str):
     """Resolve a #token to a registered active group by case-insensitive
     substring; dots stand in for spaces (#site.b -> 'site b').
@@ -269,7 +299,33 @@ def _match_group(s, token: str):
                       + (", ".join(g.name for g in groups) or "none") + ".")
     return None, (f"'#{token.lstrip('#')}' matches several groups: "
                   + ", ".join(g.name for g in hits)
-                  + ". Be more specific (dots work as spaces, e.g. #site.b).")
+                  + ". Be more specific - dot it (#site.b) or quote it "
+                    "(#\"Site B\").")
+
+
+def _resolve_group_run(s, words: list[str], i: int):
+    """words[i] starts with '#'. Same greedy rule as @names: absorb the
+    following plain words so an unquoted, undotted group name works
+    ('#De Leadership team'). The LONGEST run that matches exactly one group
+    wins. Returns (group|None, next_index, error|None) - on failure the error
+    is the one the single token alone would have produced, so an ambiguous
+    '#site' still says 'matches several groups'."""
+    best_g, best_j = None, i + 1
+    j = i + 1
+    parts = [words[i].lstrip("#").strip(",;:")]
+    while True:
+        g, _err = _match_group(s, ".".join(parts))
+        if g:
+            best_g, best_j = g, j
+        if (j >= len(words) or len(parts) >= MAX_NAME_WORDS
+                or _is_option_token(words[j])):
+            break
+        parts.append(words[j].strip(",;:"))
+        j += 1
+    if best_g:
+        return best_g, best_j, None
+    _g, err = _match_group(s, words[i])
+    return None, i + 1, err
 
 
 def _creator_in_group(sender: Member, chat_id: str):
@@ -297,13 +353,53 @@ def _find_member_by_ref(s, ref: str) -> Member | None:
 
 
 def _find_member_by_name(s, name: str) -> Member | None:
-    name = name.lower()
+    """Resolve a typed name. A dot stands in for a space (@Ravi.Shankar ->
+    'ravi shankar'), matching the #group.tag convention. Exact match wins;
+    otherwise a UNIQUE prefix match (@Ravi -> Ravi Shankar)."""
+    name = name.replace(".", " ").strip().lower()
+    name = re.sub(r"\s+", " ", name)
+    if not name:
+        return None
     members = s.query(Member).filter(Member.active.is_(True)).all()
     exact = [m for m in members if m.name.lower() == name]
     if exact:
         return exact[0]
     prefix = [m for m in members if m.name.lower().startswith(name)]
     return prefix[0] if len(prefix) == 1 else None
+
+
+# How many words a member name may span when we greedily join tokens
+# ('@Ravi shankar' typed without the dot).
+MAX_NAME_WORDS = 4
+
+
+def _is_option_token(w: str) -> bool:
+    """A token that belongs to the schedule/option grammar, never to a name."""
+    return (bool(RE_TIME.match(w)) or _parse_day_token(w) is not None
+            or w.startswith("@") or w.startswith("#") or w.startswith("!"))
+
+
+def _resolve_member_run(s, words: list[str], i: int):
+    """words[i] starts with '@'. Resolve it, greedily absorbing the following
+    plain words so an unquoted spaced name works too ('@Ravi shankar').
+    Longest run that resolves wins. Returns (member|None, next_index)."""
+    ref = words[i].lstrip("@").strip(",;:")
+    if not ref:
+        return None, i + 1
+    best_m, best_j = None, i + 1
+    j = i + 1
+    parts = [ref]
+    while True:
+        m = _find_member_by_ref(s, " ".join(parts)) if len(parts) == 1 \
+            else _find_member_by_name(s, " ".join(parts))
+        if m:
+            best_m, best_j = m, j
+        if (j >= len(words) or len(parts) >= MAX_NAME_WORDS
+                or _is_option_token(words[j])):
+            break
+        parts.append(words[j].strip(",;:"))
+        j += 1
+    return best_m, best_j
 
 
 def _task_body(t: Task) -> str:
@@ -359,10 +455,15 @@ def _apply_verb(s, sender: Member, task: Task, verb: str, rest: str,
                           channel="whatsapp", raw_text=raw)
             alert = (f"[!] Blocker on task #{task.id} '{task.title}'\n"
                      f"By: {sender.name}\nReason: {reason}")
-            # "block waiting on @Priya" -> hand the block to that person
+            # "block waiting on @Priya" -> hand the block to that person.
+            # Names may be dotted (@Ravi.Shankar), quoted (normalised to the
+            # dotted form upstream) or spaced (@Ravi Shankar - joined greedily).
             extra = []
-            mref = re.search(r"@(\w+)", reason)
-            waited = _find_member_by_ref(s, mref.group(1)) if mref else None
+            rwords = reason.split()
+            at = next((k for k, w in enumerate(rwords)
+                       if re.match(r"^@([A-Za-z][\w.]*|\d{6,20})", w)), None)
+            waited = _resolve_member_run(s, rwords, at)[0] if at is not None \
+                else None
             if waited and waited.active and waited.id != sender.id:
                 task.waiting_on_id = waited.id
                 extra.append(_waiting_notice(s, task, sender, waited))
@@ -416,26 +517,28 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
         if token in text.lower():
             priority = val
             text = re.sub(re.escape(token), "", text, flags=re.IGNORECASE)
+    words = text.split()
     # optional #group tag: post the task to that group (DM-created tasks)
     tag_group = None
-    gm = re.search(r"#([\w.]+)", text)
-    if gm:
-        tag_group, gerr = _match_group(s, gm.group(1))
+    gi = next((k for k, w in enumerate(words) if w.startswith("#")), None)
+    if gi is not None:
+        tag_group, gnxt, gerr = _resolve_group_run(s, words, gi)
         if gerr:
             return None, gerr
-        text = text.replace(gm.group(0), "")
+        words = words[:gi] + words[gnxt:]
     assignee = sender
-    m = re.search(r"@([A-Za-z][\w.]*|\d{6,20})", text)
-    if m:
-        found = _find_member_by_ref(s, m.group(1))
+    at = next((k for k, w in enumerate(words)
+               if re.match(r"^@([A-Za-z][\w.]*|\d{6,20})", w)), None)
+    if at is not None:
+        found, nxt = _resolve_member_run(s, words, at)
         if not found:
-            return None, (f"I don't recognise '@{m.group(1)}' as a team member. "
-                          "Use their registered name (e.g. @Ravi) or make sure "
-                          "they are registered.")
+            return None, (f"I don't recognise '{words[at]}' as a team member. "
+                          "If the name has a space, dot it (@Ravi.Shankar) or "
+                          "quote it (@\"Ravi Shankar\"). Otherwise check they "
+                          "are registered.")
         assignee = found
-        text = text.replace(m.group(0), "")
+        words = words[:at] + words[nxt:]
     due = None
-    words = text.split()
     if words:
         d = parse_date_word(words[-1])
         if d:
@@ -489,21 +592,23 @@ def _parse_schedule_tokens(s, words):
             i += 1
             continue
         if w.startswith("@") and len(w) > 1:
-            m = _find_member_by_ref(s, w[1:])
+            m, nxt = _resolve_member_run(s, words, i)
             if not m:
-                return None, None, (f"I don't recognise '{w}' as a team "
-                                    "member.")
+                return None, None, (
+                    f"I don't recognise '{w}' as a team member. If the name "
+                    "has a space, dot it (@Ravi.Shankar) or quote it "
+                    "(@\"Ravi Shankar\"). Send /members to see the list.")
             out["member_ids"].append(m.id)
             out["recipient_names"].append(m.name)
-            i += 1
+            i = nxt
             continue
         if w.startswith("#") and len(w) > 1:
-            g, gerr = _match_group(s, w)
+            g, nxt, gerr = _resolve_group_run(s, words, i)
             if gerr:
                 return None, None, gerr
             out["group_ids"].append(g.id)
             out["recipient_names"].append(g.name)
-            i += 1
+            i = nxt
             continue
         break
     return out, words[i:], None
@@ -594,6 +699,12 @@ def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
     if not opts["member_ids"] and not opts["group_ids"]:
         return Reply(text="Who is it for? Add @Name members and/or a "
                           "#group.")
+    if not opts["send_time"]:
+        return Reply(text="When should it go out? I need a time, e.g.\n"
+                          "/nudge 07:30 tue @Ravi.Shankar " + message[:30]
+                          + "\nA name with a space joins with a dot "
+                            "(@Ravi.Shankar). Days are optional - no days "
+                            "means every day.")
     draft = {"kind": "nudge", "message": message,
              "member_ids": opts["member_ids"], "group_ids": opts["group_ids"],
              "days": opts["days"] or [], "send_time": opts["send_time"],
@@ -710,6 +821,9 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
     body = (body or "").strip()
     if not body:
         return Reply()
+    # @"Ravi Shankar" / #"Site B" -> the dotted form the parsers expect.
+    # Done once, here, so every command path accepts both spellings.
+    body = _dequote_refs(body)
 
     # ---- pending Y/N confirmation (an /add draft, or task acceptance) ----
     pending = (s.query(PendingConfirm)

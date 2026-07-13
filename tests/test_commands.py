@@ -540,6 +540,230 @@ def test_help_is_role_aware(s, team):
     assert "/adduser" not in r_grp.text
 
 
+# ------- v1.6.5: spaced names (@Ravi.Shankar), nudge needs a time -------
+@pytest.fixture()
+def spaced(s, team):
+    """A member whose name contains a space."""
+    m = Member(name="Ravi Shankar", phone="971500000004", role="member")
+    s.add(m); s.commit()
+    return m
+
+
+def test_help_lists_slash_commands_first_and_dot_names(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/help", admin)
+    t = r.text
+    # every /command appears before the status verbs
+    assert t.index("/add ") < t.index("1 done")
+    assert t.index("/help") < t.index("1 done")
+    assert "@Ravi.Shankar" in t          # spaced-name example
+    assert "1 block <reason>" in t       # status verbs still documented
+
+
+def test_nudge_dotted_spaced_name(s, team, spaced):
+    admin, _, _ = team
+    r = handle_message(s, admin,
+                       "/nudge 7:30 Tue @Ravi.Shankar What is the status",
+                       admin)
+    assert "Create nudge" in r.text and "Ravi Shankar" in r.text
+    assert "07:30" in r.text
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    import json as _jj
+    assert b.send_time == "07:30" and _jj.loads(b.days) == [1]
+    assert _jj.loads(b.member_ids) == [spaced.id]
+    assert b.message == "What is the status"
+
+
+def test_nudge_unquoted_spaced_name_greedy(s, team, spaced):
+    """The original bug: '@Ravi shankar 7:30 Tue ...' silently lost the time."""
+    admin, _, _ = team
+    r = handle_message(s, admin,
+                       "/nudge @Ravi shankar 7:30 Tue What is the status",
+                       admin)
+    assert "Create nudge" in r.text and "Ravi Shankar" in r.text
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    import json as _jj
+    assert b.send_time == "07:30" and _jj.loads(b.days) == [1]
+    assert b.message == "What is the status"
+
+
+def test_nudge_greedy_does_not_eat_the_message(s, team, spaced):
+    admin, _, _ = team
+    handle_message(s, admin, "/nudge 08:00 @Ravi.Shankar Ravi send the report",
+                   admin)
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    assert b.message == "Ravi send the report"
+
+
+def test_nudge_without_time_refused(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/nudge @Ravi What is the status", admin)
+    assert "When should it go out" in r.text
+    assert s.query(Broadcast).count() == 0      # no silent manual-only nudge
+
+
+def test_nudge_unknown_name_hints_at_dot(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/nudge 07:30 @Nobody Hello", admin)
+    assert "don't recognise" in r.text and "@Ravi.Shankar" in r.text
+
+
+def test_add_accepts_spaced_names(s, team, spaced):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/add Fix the pump @Ravi.Shankar fri", admin)
+    assert "Ravi Shankar" in r.text
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.title == "Fix the pump" and t.assignee_id == spaced.id
+    assert t.due_date is not None
+    # unquoted form too - and the date word must survive
+    r2 = handle_message(s, admin, "/add Order rebar @Ravi shankar tomorrow",
+                        admin)
+    assert "Ravi Shankar" in r2.text
+    handle_message(s, admin, "y", admin)
+    t2 = s.query(Task).order_by(Task.id.desc()).first()
+    assert t2.title == "Order rebar" and t2.assignee_id == spaced.id
+    assert t2.due_date == date.today() + timedelta(days=1)
+
+
+def test_nudge_quoted_spaced_name(s, team, spaced):
+    admin, _, _ = team
+    r = handle_message(s, admin,
+                       '/nudge 7:30 Tue @"Ravi Shankar" What is the status',
+                       admin)
+    assert "Create nudge" in r.text and "Ravi Shankar" in r.text
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    import json as _jj
+    assert b.send_time == "07:30" and _jj.loads(b.days) == [1]
+    assert _jj.loads(b.member_ids) == [spaced.id]
+    assert b.message == "What is the status"
+
+
+def test_curly_quotes_from_phone_keyboards(s, team, spaced, grp):
+    """iOS/Android autocorrect curls quotes - both forms must resolve."""
+    admin, _, _ = team
+    g, _g2 = grp
+    r = handle_message(s, admin,
+                       "/nudge 07:30 @“Ravi Shankar” "
+                       "#“Site B Construction” Status?", admin)
+    assert "Create nudge" in r.text
+    assert "Ravi Shankar" in r.text and "Site B Construction" in r.text
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    import json as _jj
+    assert _jj.loads(b.member_ids) == [spaced.id]
+    assert _jj.loads(b.group_ids) == [g.id]
+    assert b.message == "Status?"
+
+
+def test_add_quoted_name_and_group(s, team, spaced, grp, monkeypatch):
+    admin, _, _ = team
+    g, _g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    r = handle_message(s, admin,
+                       '/add Fix the pump @"Ravi Shankar" #"Site B" fri', admin)
+    assert "Ravi Shankar" in r.text and "Site B Construction" in r.text
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.title == "Fix the pump" and t.assignee_id == spaced.id
+    assert t.post_to_group_id == g.id
+
+
+def test_quotes_elsewhere_in_the_text_are_untouched(s, team):
+    admin, ravi, _ = team
+    handle_message(s, admin, '/add Fix the "big" pump @Ravi', admin)
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.title == 'Fix the "big" pump' and t.assignee_id == ravi.id
+
+
+def test_block_waiting_on_spaced_name(s, team, spaced):
+    """The block hand-off must resolve dotted/quoted names too - the old
+    @(\\w+) regex silently truncated @Ravi.Shankar to @Ravi."""
+    admin, ravi, _ = team
+    t = _task(s, team)
+    r = handle_message(s, ravi, f'{t.id} block waiting on @"Ravi Shankar"',
+                       admin)
+    assert s.get(Task, t.id).waiting_on_id == spaced.id
+    assert any(spaced.phone in cid for cid, _ in r.extra_sends)
+    # and the dotted form
+    t2 = _task(s, team, title="Second")
+    handle_message(s, ravi, f"{t2.id} block waiting on @Ravi.Shankar", admin)
+    assert s.get(Task, t2.id).waiting_on_id == spaced.id
+
+
+def test_reversed_curly_quote_from_a_phone(s, team, spaced, grp, monkeypatch):
+    """A pasted/space-preceded quote curls the WRONG way: the opener arrives
+    as the closing glyph. Insisting on a matched pair failed silently and
+    dumped the raw tag into the task title."""
+    admin, _, _ = team
+    g, _g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    r = handle_message(
+        s, admin,
+        '/add Thennangur status update @”Ravi Shankar” #”Site B” !high', admin)
+    assert "Ravi Shankar" in r.text and "Site B Construction" in r.text
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.title == "Thennangur status update"     # no stray #"..." in it
+    assert t.assignee_id == spaced.id and t.post_to_group_id == g.id
+    assert t.priority == "high"
+
+
+def test_group_tag_unquoted_spaces(s, team, grp, monkeypatch):
+    """#De Leadership team - no dot, no quotes - still resolves greedily."""
+    admin, ravi, _ = team
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    g3 = Group(name="De Leadership team", chat_id="120363999@g.us")
+    s.add(g3); s.commit()
+    r = handle_message(s, admin,
+                       "/add Project status update @Ravi #De Leadership team",
+                       admin)
+    assert "announced in De Leadership team" in r.text
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.title == "Project status update" and t.post_to_group_id == g3.id
+
+
+def test_group_greedy_does_not_eat_the_nudge_message(s, team, grp):
+    admin, _, _ = team
+    g, _g2 = grp
+    handle_message(s, admin, "/nudge 07:30 #site.b Site inspection at nine",
+                   admin)
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    assert b.message == "Site inspection at nine"
+    import json as _jj
+    assert _jj.loads(b.group_ids) == [g.id]
+
+
+def test_ambiguous_group_still_refused_after_greedy(s, team, grp):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/add Fix pump @Ravi #site", admin)
+    assert "matches several groups" in r.text
+    assert s.query(Task).count() == 0
+
+
+def test_help_shows_both_spaced_name_forms(s, team):
+    admin, _, _ = team
+    t = handle_message(s, admin, "/help", admin).text
+    assert "@Ravi.Shankar" in t and '@"Ravi Shankar"' in t
+    assert t.index("/add ") < t.index("1 done")
+
+
+def test_exact_short_name_still_wins_over_longer(s, team, spaced):
+    """'Ravi' and 'Ravi Shankar' both exist: @Ravi must resolve to Ravi."""
+    admin, ravi, _ = team
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.assignee_id == ravi.id
+
+
 # ---------------- queries ----------------
 def test_mytasks_and_list(s, team):
     admin, ravi, _ = team
