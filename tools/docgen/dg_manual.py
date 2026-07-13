@@ -256,12 +256,16 @@ E.append(P("Admins can run the essentials from their phone by <b>DM'ing the bot 
 E.append(table(["Command", "What it does"],
     [[Paragraph("<font face='Mono-Bold'>/nudge 07:30 tue @Ravi.Shankar #site "
                 "What is the status?</font>", S["tcell"]),
-      "Create a nudge: the time (24h) is <b>required</b> — without one the bot "
-      "asks for it rather than creating a nudge that never fires. Then days "
-      "(or 'daily' / omit = every day), @Name members and #group targets, then "
-      "the message, sent verbatim. <b>A name with a space is dotted or quoted</b> "
-      "— @Ravi.Shankar or @\"Ravi Shankar\". Timezone pins to the dashboard "
-      "setting. Manual-only nudges (no time) can still be made on the dashboard."],
+      "Create a nudge: the time is <b>required</b> — without one the bot asks for "
+      "it rather than creating a nudge that never fires. Write it however you "
+      "like: <font face='Mono'>07:30 · 7:30 · 730 · 0730 · 7.30 · 7:30am · 730pm "
+      "· 7am</font> all mean the same thing. (A bare <font face='Mono'>3</font> is "
+      "read as a nudge <i>number</i>, not 3 o'clock — write 3pm or 15:00.) Then "
+      "days (or 'daily' / omit = every day), @Name members and #group targets, "
+      "then the message, sent verbatim. <b>A name with a space is dotted or "
+      "quoted</b> — @Ravi.Shankar or @\"Ravi Shankar\". Timezone pins to the "
+      "dashboard setting. Manual-only nudges (no time) can still be made on the "
+      "dashboard."],
      [Paragraph("<font face='Mono-Bold'>/nudges</font>", S["tcell"]),
       "Numbered list of every nudge with schedule, recipients and "
       "active/paused state."],

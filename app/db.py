@@ -41,6 +41,9 @@ DEFAULTS = {
     "ack_mode": "reaction",          # none | reaction | reply
     "personal_mode": False,          # bot runs on the owner's personal number
     "hourly_cap": 60,
+    "min_gap_seconds": 15,           # spacing between two messages of a run
+    "max_gap_seconds": 30,
+    "jitter_minutes": 6,             # +/- drift on every scheduled start time
     "purge_after_days": 30,
     "last_send": "",
     "last_backup": "",

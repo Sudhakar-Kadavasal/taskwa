@@ -748,11 +748,125 @@ def test_ambiguous_group_still_refused_after_greedy(s, team, grp):
     assert s.query(Task).count() == 0
 
 
+def test_time_formats_people_actually_type(s, team):
+    from app.commands import _parse_time_token as pt
+    assert pt("07:30") == pt("7:30") == pt("7.30") == pt("730") == pt("0730") \
+        == pt("7:30am") == pt("730am") == "07:30"
+    assert pt("7am") == "07:00" and pt("7PM") == "19:00"
+    assert pt("730pm") == pt("19:30") == pt("7:30pm") == "19:30"
+    assert pt("12am") == "00:00" and pt("12pm") == "12:00"
+    # not times
+    assert pt("3") is None          # a bare number is a nudge id
+    assert pt("25:00") is None and pt("790") is None and pt("13pm") is None
+    assert pt("fri") is None and pt("hello") is None
+
+
+@pytest.mark.parametrize("typed,expect", [
+    ("07:30", "07:30"), ("7:30", "07:30"), ("730", "07:30"), ("0730", "07:30"),
+    ("7.30", "07:30"), ("7:30am", "07:30"), ("730am", "07:30"),
+    ("7am", "07:00"), ("7 am", "07:00"), ("7:30 PM", "19:30"),
+    ("19:30", "19:30"), ("730pm", "19:30"),
+])
+def test_nudge_accepts_every_time_spelling(s, team, typed, expect):
+    admin, _, _ = team
+    r = handle_message(s, admin, f"/nudge {typed} tue @Ravi Status?", admin)
+    assert "Create nudge" in r.text, r.text
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    assert b.send_time == expect
+    assert b.message == "Status?"
+
+
+def test_nudge_id_still_beats_a_time_lookalike(s, team):
+    """/nudge 3 08:15 must reschedule nudge 3, not create a 3 o'clock nudge."""
+    admin, _, _ = team
+    handle_message(s, admin, "/nudge 07:30 daily @Ravi Hello", admin)
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).first()
+    r = handle_message(s, admin, f"/nudge {b.id} 0815 thu", admin)
+    assert "updated" in r.text
+    assert s.get(Broadcast, b.id).send_time == "08:15"
+    assert s.query(Broadcast).count() == 1
+    # a bare id that doesn't exist is still an id, not a time
+    r2 = handle_message(s, admin, "/nudge 99 08:15", admin)
+    assert "no nudge 99" in r2.text
+
+
 def test_help_shows_both_spaced_name_forms(s, team):
     admin, _, _ = team
     t = handle_message(s, admin, "/help", admin).text
     assert "@Ravi.Shankar" in t and '@"Ravi Shankar"' in t
     assert t.index("/add ") < t.index("1 done")
+
+
+# ------- v1.6.5: renaming a member -------
+def test_rename_changes_what_the_team_sees(s, team, grp, monkeypatch):
+    """The stored name - not the phone's contact list - is what appears in a
+    group announcement. Renaming must change it everywhere at once."""
+    from app.engine import rename_member
+    admin, ravi, _ = team
+    g, _g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    ok, msg = rename_member(s, ravi, "Ravi Shankar")
+    assert ok and "Renamed Ravi to Ravi Shankar" in msg
+    s.commit()
+    handle_message(s, admin, "/add Fix the pump @Ravi.Shankar #site.b", admin)
+    r = handle_message(s, admin, "y", admin)
+    _cid, txt = r.extra_sends[0]
+    assert "New task for Ravi Shankar" in txt      # the group sees the new name
+
+
+def test_rename_refuses_a_duplicate(s, team):
+    from app.engine import rename_member
+    admin, ravi, priya = team
+    ok, msg = rename_member(s, ravi, "priya")      # case-insensitive
+    assert not ok
+    assert "already used by" in msg and priya.phone in msg
+    assert s.get(Member, ravi.id).name == "Ravi"   # unchanged
+
+
+def test_rename_refuses_a_duplicate_of_an_inactive_member(s, team):
+    """Otherwise reactivating that person later would create the collision."""
+    from app.engine import rename_member
+    admin, ravi, priya = team
+    priya.active = False
+    s.flush()
+    ok, msg = rename_member(s, ravi, "Priya")
+    assert not ok and "deactivated" in msg
+
+
+def test_rename_warns_about_a_prefix_clash_but_allows_it(s, team):
+    from app.engine import rename_member
+    admin, ravi, _ = team
+    extra = Member(name="Ravi Shankar", phone="971500000009", role="member")
+    s.add(extra); s.flush()
+    ok, msg = rename_member(s, ravi, "Ravi Kumar")
+    assert ok
+    assert "ambiguous" in msg and "@Ravi.Kumar" in msg
+    assert s.get(Member, ravi.id).name == "Ravi Kumar"
+
+
+def test_rename_rejects_empty_and_trims(s, team):
+    from app.engine import rename_member
+    admin, ravi, _ = team
+    ok, msg = rename_member(s, ravi, "   ")
+    assert not ok and "empty" in msg
+    ok, _ = rename_member(s, ravi, "  Ravi   Shankar  ")
+    assert ok and s.get(Member, ravi.id).name == "Ravi Shankar"
+
+
+def test_adduser_reactivation_keeps_the_curated_name(s, team):
+    """Re-adding a deactivated member must not silently overwrite the name
+    that was set on the dashboard."""
+    admin, _, _ = team
+    m = Member(name="Ravi Shankar", phone="971509998877", role="member",
+               active=False)
+    s.add(m); s.commit()
+    handle_message(s, admin, "/adduser 971509998877 Ravi", admin)
+    r = handle_message(s, admin, "y", admin)
+    assert "Re-activated" in r.text and "Name kept" in r.text
+    assert s.get(Member, m.id).name == "Ravi Shankar"
+    assert s.get(Member, m.id).active
 
 
 def test_exact_short_name_still_wins_over_longer(s, team, spaced):

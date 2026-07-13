@@ -60,7 +60,9 @@ ADMIN_HELP = (
     "/adduser <number> <name> - register a member\n"
     "/members - list registered members\n"
     "e.g. /nudge 07:30 tue @Ravi.Shankar What is the status\n"
-    "     /nudge 07:30 tue @\"Ravi Shankar\" What is the status"
+    "     /nudge 730 tue @\"Ravi Shankar\" What is the status\n"
+    "Time: 07:30  7:30  730  0730  7.30  7:30am  730pm  7am all work.\n"
+    "(A bare '3' is a nudge number, not 3 o'clock - write 3pm or 15:00.)"
 )
 
 VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock|cancel(?:led)?)"
@@ -375,7 +377,7 @@ MAX_NAME_WORDS = 4
 
 def _is_option_token(w: str) -> bool:
     """A token that belongs to the schedule/option grammar, never to a name."""
-    return (bool(RE_TIME.match(w)) or _parse_day_token(w) is not None
+    return (_parse_time_token(w) is not None or _parse_day_token(w) is not None
             or w.startswith("@") or w.startswith("#") or w.startswith("!"))
 
 
@@ -558,9 +560,53 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
 
 
 # ---------------- admin commands (DM only): /nudge /nudges /adduser -------
-RE_TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
 DAY_ALIASES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4,
                "sat": 5, "sun": 6}
+
+# Times, the way people actually type them on a phone. Separator may be a
+# colon, a dot or nothing; am/pm optional (and may arrive as its own token,
+# see _join_ampm). A BARE 1-2 digit number is deliberately NOT a time: it
+# would collide with the nudge id in '/nudge 3 08:15'. Write '7am' or '07:00'.
+RE_AMPM = re.compile(r"^([ap])\.?m\.?$", re.IGNORECASE)
+
+
+def _parse_time_token(tok: str) -> str | None:
+    """Any reasonable spelling of a clock time -> 'HH:MM'. None if it isn't
+    one. Accepts 07:30 7:30 7.30 0730 730 7:30am 730pm 7am (case-free)."""
+    t = tok.strip().lower().rstrip(",;")
+    m = re.match(r"^(?:(\d{1,2})[:.](\d{2})|(\d{3,4})|(\d{1,2}))"
+                 r"\s*(a\.?m\.?|p\.?m\.?)?$", t)
+    if not m:
+        return None
+    ampm = (m.group(5) or "").replace(".", "")
+    if m.group(1) is not None:                       # 7:30 / 7.30
+        hh, mm = int(m.group(1)), int(m.group(2))
+    elif m.group(3) is not None:                     # 730 / 0730
+        digits = m.group(3)
+        hh, mm = int(digits[:-2]), int(digits[-2:])
+    else:                                            # bare 1-2 digits
+        if not ampm:
+            return None      # '3' is a nudge id, not a time. '3pm' is a time.
+        hh, mm = int(m.group(4)), 0
+    if ampm:
+        if not 1 <= hh <= 12:
+            return None
+        hh = (hh % 12) + (12 if ampm.startswith("p") else 0)
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+    return f"{hh:02d}:{mm:02d}"
+
+
+def _join_ampm(words: list[str]) -> list[str]:
+    """'7:30 pm' arrives as two tokens - glue the am/pm back on."""
+    out: list[str] = []
+    for w in words:
+        if out and RE_AMPM.match(w) and re.match(r"^\d{1,4}([:.]\d{2})?$",
+                                                 out[-1]):
+            out[-1] = out[-1] + w
+        else:
+            out.append(w)
+    return out
 
 
 def _parse_day_token(tok: str):
@@ -574,16 +620,17 @@ def _parse_day_token(tok: str):
 
 
 def _parse_schedule_tokens(s, words):
-    """Consume leading option tokens (HH:MM, day lists, @members, #groups).
+    """Consume leading option tokens (a time, day lists, @members, #groups).
     Returns (dict, remaining_words, error|None)."""
     out = {"send_time": "", "days": None, "member_ids": [], "group_ids": [],
            "recipient_names": []}
+    words = _join_ampm(words)
     i = 0
     while i < len(words):
         w = words[i]
-        tm = RE_TIME.match(w)
-        if tm and 0 <= int(tm.group(1)) <= 23 and 0 <= int(tm.group(2)) <= 59:
-            out["send_time"] = f"{int(tm.group(1)):02d}:{tm.group(2)}"
+        hhmm = _parse_time_token(w)
+        if hhmm:
+            out["send_time"] = hhmm
             i += 1
             continue
         days = _parse_day_token(w)
@@ -634,7 +681,7 @@ def _nudge_summary(s, b) -> str:
 def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
     """/nudge …  - create, reschedule, on/off, delete."""
     from .models import Broadcast
-    words = rest.split()
+    words = _join_ampm(rest.split())   # before the id check: '7 am' is a time
     if not words:
         return Reply(text="Usage:\n/nudge [HH:MM] [mon,wed,fri|daily] "
                           "[@Name…] [#group…] <message>\n"
@@ -661,7 +708,11 @@ def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
         return Reply(text=f"Nudge {b.id} \"{b.name}\" is now "
                           + ("active." if b.active else "paused."))
     # --- reschedule: /nudge <id> <tokens> ---
-    if words[0].isdigit():
+    # A leading number is a nudge id... unless it's really a time. '730' and
+    # '0730' are times; '3' is an id. An existing nudge with that id always
+    # wins, so /nudge 3 08:15 keeps working.
+    if words[0].isdigit() and not (s.get(Broadcast, int(words[0])) is None
+                                   and _parse_time_token(words[0])):
         b = s.get(Broadcast, int(words[0]))
         if b is None:
             return Reply(text=f"There is no nudge {words[0]}. Send /nudges.")
@@ -702,9 +753,9 @@ def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
     if not opts["send_time"]:
         return Reply(text="When should it go out? I need a time, e.g.\n"
                           "/nudge 07:30 tue @Ravi.Shankar " + message[:30]
-                          + "\nA name with a space joins with a dot "
-                            "(@Ravi.Shankar). Days are optional - no days "
-                            "means every day.")
+                          + "\nAny of these work: 07:30  7:30  730  0730  "
+                            "7.30  7:30am  730pm  7am\n"
+                            "Days are optional - no days means every day.")
     draft = {"kind": "nudge", "message": message,
              "member_ids": opts["member_ids"], "group_ids": opts["group_ids"],
              "days": opts["days"] or [], "send_time": opts["send_time"],
@@ -802,9 +853,14 @@ def _confirm_adduser(s, draft: dict, accepted: bool) -> Reply:
         Member.phone == draft["phone"]).first()
     if existing:
         existing.active = True
-        existing.name = draft["name"]
+        # The stored name is kept: it is the addressing key (@Ravi.Shankar) and
+        # what the team sees in group announcements. Re-adding someone must not
+        # silently overwrite a name that was curated on the dashboard. Rename
+        # there if it needs changing.
+        kept = "" if existing.name == draft["name"] else \
+            f"\nName kept as \"{existing.name}\" (rename on the dashboard)."
         return Reply(text=f"Re-activated {existing.name} ({existing.phone}). "
-                          "They can use commands right away.")
+                          "They can use commands right away." + kept)
     m = Member(name=draft["name"], phone=draft["phone"], role="member")
     s.add(m)
     s.flush()

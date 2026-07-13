@@ -294,6 +294,7 @@ def send_text(chat_id: str, text: str) -> bool:
                              detail="hourly cap reached"))
             log.warning("hourly cap reached; message to %s not sent", chat_id)
             return False
+    _throttle()     # never two messages within a few seconds of each other
     try:
         with _client() as c:
             r = c.post("/api/sendText", json={
@@ -328,24 +329,75 @@ def send_reaction(message_id: str, reaction: str = "\U0001F44D") -> bool:
         return False
 
 
-_batch_lock = None
+def plan_gaps(n: int, min_gap: float, max_gap: float,
+              rnd: random.Random | None = None) -> list[float]:
+    """The n-1 gaps between n messages: each a fresh random value in
+    [min_gap, max_gap]. Pure and testable - no sleeping.
+
+    A gap rule rather than a fixed window on purpose: a window would silently
+    compress the spacing as the team grows (30 people in 15 minutes = 30 s
+    apart), which is exactly backwards - a bigger fan-out is the riskier one.
+    Constant gaps mean a bigger run simply takes longer."""
+    rnd = rnd or random
+    if n <= 1:
+        return []
+    lo, hi = min(min_gap, max_gap), max(min_gap, max_gap)
+    return [rnd.uniform(lo, hi) for _ in range(n - 1)]
 
 
-def _get_batch_lock():
-    global _batch_lock
-    if _batch_lock is None:
+def gap_settings(s) -> tuple[float, float]:
+    """(min, max) seconds between two messages of a run. Dry-run rehearsals
+    get no gaps at all - they must finish now, not in ten minutes."""
+    if get_setting(s, "dry_run"):
+        return 0.0, 0.0
+    lo = float(get_setting(s, "min_gap_seconds") or 15)
+    hi = float(get_setting(s, "max_gap_seconds") or 30)
+    return min(lo, hi), max(lo, hi)
+
+
+# --- global send throttle -------------------------------------------------
+# THE ban-risk primitive. Every outbound message - digest, nudge, admin alert,
+# an interactive reply from the webhook - passes through send_text, so the
+# floor is enforced here rather than in each caller. Two messages can never
+# leave within MIN_INTERVAL seconds of each other, no matter which code path
+# asked. A lone reply waits ~0s (nothing was sent recently); a burst is
+# stretched out automatically.
+MIN_INTERVAL = 3.0      # seconds, hard floor between ANY two sends
+MAX_INTERVAL = 8.0      # upper end of the randomised floor
+_throttle_lock = None
+_last_send_at = [0.0]   # list, so the closure can rebind without `global`
+
+
+def _get_throttle_lock():
+    global _throttle_lock
+    if _throttle_lock is None:
         import threading
-        _batch_lock = threading.Lock()
-    return _batch_lock
+        _throttle_lock = threading.Lock()
+    return _throttle_lock
 
 
-def paced_send(messages: list[tuple[str, str]], min_gap: float = 3,
-               max_gap: float = 8):
-    """Send a batch with human-like random spacing. A global lock serialises
-    concurrent batches (e.g. a broadcast and the digest firing at the same
-    minute) so sends never burst out in parallel - ban-risk hygiene."""
-    with _get_batch_lock():
-        for i, (chat_id, text) in enumerate(messages):
-            send_text(chat_id, text)
-            if i < len(messages) - 1:
-                time.sleep(random.uniform(min_gap, max_gap))
+def _throttle():
+    """Block until MIN_INTERVAL..MAX_INTERVAL seconds have passed since the
+    last send anywhere in the process."""
+    with _get_throttle_lock():
+        need = random.uniform(MIN_INTERVAL, MAX_INTERVAL)
+        wait = need - (time.monotonic() - _last_send_at[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_send_at[0] = time.monotonic()
+
+
+def paced_send(messages: list[tuple[str, str]], min_gap: float = 15,
+               max_gap: float = 30):
+    """Send a batch, one message every min_gap..max_gap seconds.
+
+    Deliberately NOT holding a lock for the whole batch: a long digest run
+    would otherwise queue an urgent blocker alert behind it. Batches may
+    interleave; the throttle inside send_text still guarantees that no two
+    messages leave together."""
+    gaps = plan_gaps(len(messages), min_gap, max_gap)
+    for i, (chat_id, text) in enumerate(messages):
+        send_text(chat_id, text)
+        if i < len(messages) - 1:
+            # send_text's throttle already spent a few seconds of the gap
+            time.sleep(max(0.0, gaps[i] - MIN_INTERVAL))

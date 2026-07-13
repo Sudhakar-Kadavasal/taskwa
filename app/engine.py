@@ -161,6 +161,47 @@ def resolve_ref(s, member: Member, num: int,
     return s.get(Task, num)
 
 
+def rename_member(s, member: Member, new_name: str) -> tuple[bool, str]:
+    """Rename a member. Returns (ok, message).
+
+    The name is an ADDRESSING KEY, not a label: '@Ravi' is resolved against it.
+    So a duplicate is refused outright - two members with the same name would
+    make '@Ravi' resolve to an arbitrary one of them, and a task would land on
+    the wrong person with no error anywhere. Checked against every member,
+    active or not, so reactivating someone later can't create the collision.
+
+    A PREFIX clash ('Ravi' vs 'Ravi Shankar') is allowed but reported: it only
+    costs the '@Ravi' shorthand, which then refuses to guess and asks for the
+    full (dotted or quoted) name. Annoying, never wrong."""
+    name = " ".join(str(new_name or "").split())[:80]
+    if not name:
+        return False, "A name can't be empty."
+    if name.lower() == member.name.lower() and name == member.name:
+        return True, ""
+    others = s.query(Member).filter(Member.id != member.id).all()
+    clash = next((m for m in others if m.name.lower() == name.lower()), None)
+    if clash:
+        state = "" if clash.active else " (deactivated)"
+        return False, (f"'{name}' is already used by {clash.phone}{state}. "
+                       "Two members cannot share a name - '@" + name.split()[0]
+                       + "' would become ambiguous and tasks could go to the "
+                         "wrong person. Pick a different name.")
+    old, member.name = member.name, name
+    # Would the short form '@Ravi' now match more than one person? That is the
+    # clash that costs the shorthand - not whether one full name prefixes
+    # another. Allowed: the bot refuses to guess, so nothing goes astray.
+    first = name.split()[0].lower()
+    also = [m.name for m in others
+            if m.active and m.name.lower().startswith(first)]
+    if also:
+        return True, (f"Renamed {old} to {name}. Note: {', '.join(also)} also "
+                      f"starts with '{name.split()[0]}', so the short form "
+                      f"'@{name.split()[0]}' is now ambiguous - the bot will "
+                      f"ask for the full name (@{name.replace(' ', '.')}) "
+                      "rather than guess.")
+    return True, f"Renamed {old} to {name}."
+
+
 def bulk_add_members(s, rows) -> tuple[int, int]:
     """Add many members at once. rows: [{'name','phone','role'}].
     Skips numbers already registered (any status), blanks, and duplicates

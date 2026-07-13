@@ -302,7 +302,7 @@ def task_edit(request: Request, task_id: int, title: str = Form(...),
 # ---------------- members & groups ----------------
 @router.get("/members", response_class=HTMLResponse)
 def members_page(request: Request, imported: int = -1, skipped: int = 0,
-                 err: str = ""):
+                 err: str = "", note: str = ""):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
@@ -310,7 +310,8 @@ def members_page(request: Request, imported: int = -1, skipped: int = 0,
         groups = s.query(Group).filter(Group.active.is_(True)).all()
         return templates.TemplateResponse(request, "members.html", _ctx(
             request, s, members=members, groups=groups,
-            imported=imported, skipped=skipped, err=err[:200]))
+            imported=imported, skipped=skipped, err=err[:300],
+            note=note[:300]))
 
 
 def is_last_active_admin(s, member: Member) -> bool:
@@ -341,6 +342,25 @@ def member_role(request: Request, member_id: int, role: str = Form(...)):
                     "else first, then demote."), status_code=303)
         m.role = role
     return RedirectResponse("/members", status_code=303)
+
+
+@router.post("/members/{member_id}/name")
+def member_rename(request: Request, member_id: int, name: str = Form(...)):
+    """Rename a member. The name people see in group announcements and digests
+    is this one - not whatever the phone's contact list happens to say."""
+    if (r := _guard(request)):
+        return r
+    from urllib.parse import quote
+
+    from .engine import rename_member
+    with session_scope() as s:
+        m = s.get(Member, member_id)
+        if m is None:
+            return RedirectResponse("/members", status_code=303)
+        ok, msg = rename_member(s, m, name)
+    if not ok:
+        return RedirectResponse("/members?err=" + quote(msg), status_code=303)
+    return RedirectResponse("/members?note=" + quote(msg), status_code=303)
 
 
 @router.get("/members/import", response_class=HTMLResponse)
@@ -548,13 +568,20 @@ def settings_page(request: Request):
             ack_mode=get_setting(s, "ack_mode"),
             personal_mode=get_setting(s, "personal_mode"),
             hourly_cap=get_setting(s, "hourly_cap"),
+            min_gap_seconds=get_setting(s, "min_gap_seconds"),
+            max_gap_seconds=get_setting(s, "max_gap_seconds"),
+            jitter_minutes=get_setting(s, "jitter_minutes"),
             purge_after_days=get_setting(s, "purge_after_days")))
 
 
 @router.post("/settings")
 def settings_save(request: Request, timezone: str = Form(...),
                   send_times: str = Form(...), ack_mode: str = Form(...),
-                  hourly_cap: int = Form(60), purge_after_days: int = Form(30),
+                  hourly_cap: int = Form(60),
+                  min_gap_seconds: int = Form(15),
+                  max_gap_seconds: int = Form(30),
+                  jitter_minutes: int = Form(6),
+                  purge_after_days: int = Form(30),
                   dry_run: str = Form(""), personal_mode: str = Form("")):
     if (r := _guard(request)):
         return r
@@ -565,6 +592,11 @@ def settings_save(request: Request, timezone: str = Form(...),
         set_setting(s, "ack_mode",
                     ack_mode if ack_mode in ("none", "reaction", "reply") else "reaction")
         set_setting(s, "hourly_cap", max(1, hourly_cap))
+        lo = min(600, max(3, min_gap_seconds))       # 3 s is the hard floor
+        hi = min(900, max(lo, max_gap_seconds))      # max never below min
+        set_setting(s, "min_gap_seconds", lo)
+        set_setting(s, "max_gap_seconds", hi)
+        set_setting(s, "jitter_minutes", min(30, max(0, jitter_minutes)))
         set_setting(s, "purge_after_days", max(1, purge_after_days))
         set_setting(s, "dry_run", dry_run == "on")
         set_setting(s, "personal_mode", personal_mode == "on")

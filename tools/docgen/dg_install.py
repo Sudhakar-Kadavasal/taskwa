@@ -370,9 +370,10 @@ C += band("ADMIN — works only when you DM the bot directly")
 for cmd, desc in [
  ("/nudge 07:30 tue @Ravi.Shankar<br/>#\"Group 1\" What is the status?<br/>"
   "/nudges", "<b>Nudger</b> — a plain message the bot sends for you, on a "
-  "schedule. Time first (24h, required), then days (mon,wed or 'daily' or omit "
-  "= every day), then who (@members / #groups), then the message — sent word "
-  "for word. Reply Y to confirm. <b>/nudges</b> lists them all, numbered; then "
+  "schedule. Time first (required — <b>07:30 · 7:30 · 730 · 0730 · 7.30 · "
+  "7:30am · 730pm · 7am</b> all work), then days (mon,wed or 'daily' or omit = "
+  "every day), then who (@members / #groups), then the message — sent word for "
+  "word. Reply Y to confirm. <b>/nudges</b> lists them all, numbered; then "
   "<b>/nudge 3 08:15 thu</b> reschedules, <b>/nudge off 3</b> · <b>on 3</b> "
   "pauses/resumes, <b>/nudge delete 3</b> removes it."),
  ("/adduser 971501234567 Ravi Shankar<br/>/members",

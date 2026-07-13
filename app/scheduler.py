@@ -26,6 +26,14 @@ _DIGEST_JOB_PREFIX = "digest-"
 _BCAST_JOB_PREFIX = "bcast-"
 
 
+def jitter_seconds() -> int:
+    """How far either side of the scheduled minute a run may drift. APScheduler
+    applies this as +/- jitter, so 6 min means the 08:00 digest starts between
+    07:54 and 08:06 - never the same second every day."""
+    with session_scope() as s:
+        return max(0, int(get_setting(s, "jitter_minutes") or 0)) * 60
+
+
 def reload_digest_jobs():
     """(Re)create one cron job per configured send time."""
     for job in scheduler.get_jobs():
@@ -34,11 +42,12 @@ def reload_digest_jobs():
     with session_scope() as s:
         tz = ZoneInfo(get_setting(s, "timezone") or "UTC")
         times = get_setting(s, "send_times") or ["08:00"]
+    jit = jitter_seconds()
     for t in times:
         try:
             hh, mm = t.strip().split(":")
             scheduler.add_job(send_daily_digests, CronTrigger(
-                hour=int(hh), minute=int(mm), timezone=tz),
+                hour=int(hh), minute=int(mm), timezone=tz, jitter=jit or None),
                 id=f"{_DIGEST_JOB_PREFIX}{t}", replace_existing=True,
                 misfire_grace_time=6 * 3600, coalesce=True)
         except Exception as e:
@@ -213,15 +222,18 @@ def reload_broadcast_jobs():
         rows = [(b.id, b.send_time, b.days, broadcast_tzname(b, fallback)) for b
                 in s.query(Broadcast).filter(Broadcast.active.is_(True)).all()
                 if b.send_time]
+    jit = jitter_seconds()
     for bid, t, days_json, tzname in rows:
         try:
             tz = ZoneInfo(tzname)   # each broadcast fires in its pinned tz
             hh, mm = t.strip().split(":")
             dow = days_to_cron(_json.loads(days_json or "[]"))
             scheduler.add_job(send_broadcast, CronTrigger(
-                day_of_week=dow, hour=int(hh), minute=int(mm), timezone=tz),
+                day_of_week=dow, hour=int(hh), minute=int(mm), timezone=tz,
+                jitter=jit or None),
                 args=[bid], id=f"{_BCAST_JOB_PREFIX}{bid}",
-                replace_existing=True, misfire_grace_time=300, coalesce=True)
+                replace_existing=True,
+                misfire_grace_time=300 + jit, coalesce=True)
         except Exception as e:
             log.error("bad broadcast schedule (id=%s, %r): %s", bid, t, e)
     log.info("broadcast jobs: %s", [j.id for j in scheduler.get_jobs()

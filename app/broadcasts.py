@@ -7,12 +7,13 @@ instead of bursting - ban-risk hygiene on a personal number.
 """
 import json
 import logging
+import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .db import get_setting, session_scope
 from .models import Broadcast, Group, Member
-from .waha import chat_id_for_phone, paced_send
+from .waha import chat_id_for_phone, gap_settings, paced_send
 
 log = logging.getLogger("broadcasts")
 
@@ -107,9 +108,16 @@ def send_broadcast(broadcast_id: int):
     if not targets:
         log.info("broadcast '%s': no active recipients, nothing sent", name)
         return
-    log.info("broadcast '%s': sending to %d recipient(s)", name, len(targets))
-    paced_send([(t, text) for t in targets],
-               min_gap=BCAST_MIN_GAP, max_gap=BCAST_MAX_GAP)
+    # A nudge is the same text to many people - the most spam-shaped thing this
+    # bot does. Shuffled order, and gaps at least as wide as a digest's.
+    random.shuffle(targets)
+    with session_scope() as s:
+        lo, hi = gap_settings(s)
+    if lo or hi:                       # 0/0 means dry-run: send back to back
+        lo, hi = max(lo, BCAST_MIN_GAP), max(hi, BCAST_MAX_GAP)
+    log.info("broadcast '%s': %d recipient(s), %g-%g s apart",
+             name, len(targets), lo, hi)
+    paced_send([(t, text) for t in targets], min_gap=lo, max_gap=hi)
     with session_scope() as s:
         b = s.get(Broadcast, broadcast_id)
         if b:

@@ -1,12 +1,13 @@
 """Morning digest builder + sender (FR-11/12/13, D7/D8)."""
 import logging
+import random
 from datetime import date, datetime
 
 from .db import get_setting, session_scope, set_setting
 from .engine import (open_tasks_for, save_digest_refs,
                      save_group_digest_refs, sort_tasks)
 from .models import Group, Member, Task
-from .waha import chat_id_for_phone, paced_send
+from .waha import chat_id_for_phone, gap_settings, paced_send
 
 log = logging.getLogger("digest")
 
@@ -109,8 +110,14 @@ def send_daily_digests():
                 ordered = ordered_for_digest(sort_tasks(gtasks))
                 save_group_digest_refs(s, g.id, ordered)
                 messages.append((g.chat_id, build_group_digest(g, ordered)))
-    log.info("digest run: %d messages", len(messages))
-    paced_send(messages)
+    # Order is shuffled so the same person isn't always first in the queue
+    # (and group digests aren't always last) - a run should not look like a
+    # script walking a list in id order.
+    random.shuffle(messages)
+    with session_scope() as s:
+        lo, hi = gap_settings(s)
+    log.info("digest run: %d messages, %g-%g s apart", len(messages), lo, hi)
+    paced_send(messages, min_gap=lo, max_gap=hi)
     with session_scope() as s:
         set_setting(s, "last_send", datetime.utcnow().isoformat(timespec="seconds"))
 
@@ -118,11 +125,14 @@ def send_daily_digests():
 def alert_admins(text: str, exclude: set | None = None):
     """Send an immediate alert to every active admin (used for blockers).
     exclude: chat ids already receiving a more specific message about the
-    same event - an admin never gets told twice."""
+    same event - an admin never gets told twice.
+
+    URGENT path: no 15-30 s spacing here - a blocker alert to (usually one)
+    admin goes out at the send_text floor. The batch gaps are for fan-outs."""
     exclude = exclude or set()
     with session_scope() as s:
         admins = (s.query(Member)
                    .filter(Member.role == "admin", Member.active.is_(True)).all())
         targets = [(chat_id_for_phone(a.phone), text) for a in admins
                    if chat_id_for_phone(a.phone) not in exclude]
-    paced_send(targets)
+    paced_send(targets, min_gap=0, max_gap=0)

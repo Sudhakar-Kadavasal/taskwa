@@ -17,6 +17,21 @@
         </select></div>
       <div><label>Hourly send cap</label>
         <input type="number" name="hourly_cap" value="{{ hourly_cap }}" min="1"></div>
+      <div><label>Gap between messages (seconds)</label>
+        <span style="display:flex; gap:8px; align-items:center">
+          <input type="number" name="min_gap_seconds" value="{{ min_gap_seconds }}"
+                 min="3" max="600" style="width:90px"> to
+          <input type="number" name="max_gap_seconds" value="{{ max_gap_seconds }}"
+                 min="3" max="900" style="width:90px">
+        </span>
+        <small>Each message of a digest or nudge run waits a random gap in this
+        range before the next one goes out. 12 digests at 15-30 s take about
+        4-6 minutes. Urgent blocker alerts skip the gap.</small></div>
+      <div><label>Start-time drift (± minutes)</label>
+        <input type="number" name="jitter_minutes" value="{{ jitter_minutes }}"
+               min="0" max="30">
+        <small>An 08:00 digest with 6 starts anywhere from 07:54 to 08:06, so it
+        never fires at the same second every day. 0 = exact.</small></div>
       <div><label>Purge completed tasks after (days)</label>
         <input type="number" name="purge_after_days" value="{{ purge_after_days }}" min="1"></div>
       <div><label>Dry-run mode (log only, send nothing)</label>

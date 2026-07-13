@@ -28,10 +28,70 @@
   @Ravi.Shankar` matched on `@(\w+)` — which stops at the dot — and handed
   the block to whoever `@Ravi` resolved to. Now uses the same resolver as
   everything else.
+- **Times are now written however you like.** The old parser accepted only
+  `H:MM` / `HH:MM`; everything else silently fell into the message body.
+  Now `07:30 · 7:30 · 7.30 · 730 · 0730 · 7:30am · 730pm · 7am · 7 am ·
+  7:30 PM` all parse (case-free, separator optional, am/pm attached or as
+  its own token). **A bare 1-2 digit number is deliberately NOT a time** —
+  it would collide with the nudge id in `/nudge 3 08:15`; write `3pm` or
+  `15:00`. An existing nudge id always wins over a time lookalike.
 - **Fix: a nudge with no time is now refused.** `/nudge` over WhatsApp used
   to accept a missing time and quietly create a manual-only nudge that
   never fires. It now asks for the time. (Manual-only nudges are still
   creatable on the dashboard, where the intent is explicit.)
+### Send pacing / ban hygiene
+
+- **The rate limit moved into `send_text`** — the one choke point every
+  outbound message already passes through. No two messages can now leave
+  within 3–8 s of each other, *whoever* asked: digest, nudge, admin alert or
+  an interactive reply. Previously the spacing lived in `paced_send`, so a
+  burst of interactive replies ("done" from ten people at once) was unpaced.
+- **Messages of a run are 15–30 s apart** (`min_gap_seconds` /
+  `max_gap_seconds`, both on the Settings page). A gap rule rather than a
+  fixed window on purpose: a window silently compresses the spacing as the
+  team grows — and a bigger fan-out is the *riskier* one. Constant gaps mean a
+  bigger run simply takes longer. 12 digests ≈ 4–6 minutes.
+- **Urgent blocker alerts skip the gap** and go at the 3–8 s floor.
+- **`paced_send` no longer holds a global lock for the whole batch.** It used
+  to — which would have queued an urgent blocker alert behind the whole
+  morning digest. The throttle gives the same no-two-at-once guarantee
+  without the head-of-line blocking.
+- **Start times drift** (`jitter_minutes`, default ±6, via APScheduler's
+  `jitter`): the 08:00 digest starts somewhere in 07:54–08:06, never at the
+  same second every day. Applies to nudges too.
+- **Recipient order is shuffled** each run, so a run doesn't look like a
+  script walking a list in id order. Nudges — the same text to many people,
+  the most spam-shaped thing the bot does — keep their wider 20–45 s floor.
+- Dry-run rehearsals use no gaps and finish immediately.
+- **First tests for the timing code** (`tests/test_pacing.py`): the gap
+  planner, the throttle under concurrent batches, and a guard that
+  `paced_send` isn't a whole-batch lock. This was the repo's known test debt.
+
+### Members
+
+- **A member's name can now be edited** on the Members page (inline, saves on
+  Enter/blur). This is the name TaskWA shows — in digests, in group
+  announcements ("New task for …") and in blocker alerts — and it had been
+  stuck at whatever the phone's contact list said when the member was
+  imported. Existing tasks pick up the new name immediately; ids, history and
+  the audit trail are untouched.
+- **Duplicate names are refused.** The name is an *addressing key*: `@Ravi`
+  resolves against it. Two members sharing a name would make `@Ravi` resolve
+  to an arbitrary one of them, and a task would land on the wrong person with
+  no error anywhere. Checked case-insensitively against every member, active
+  or not, so a later reactivation can't create the collision either.
+- A **prefix clash is allowed but reported**: rename someone to "Ravi Kumar"
+  while "Ravi Shankar" exists and the banner warns that `@Ravi` is now
+  ambiguous — the bot asks for the full name rather than guessing. Annoying,
+  never wrong.
+- **Fix: `/adduser` reactivation overwrote a curated name.** Re-adding a
+  deactivated number replaced the stored name with whatever was typed. It now
+  keeps the stored name and says so.
+- The phone number stays uneditable by design — it is the identity and the
+  allowlist key. Deactivate and add new.
+
+### Commands
+
 - **`/help` restructured:** all `/commands` first, then the spaced-name
   rule (dot or quotes) with examples, then the status replies (done / in
   progress / block / unblock / reopen / cancel). Unknown-name and ambiguous
@@ -39,7 +99,10 @@
 - Command Card and User Manual regenerated: slash commands lead the card, a
   "Names with a space — dot it or quote it" section added to the manual, and
   the `/nudge` row now states that the time is required.
-- 89 tests (18 new regression tests covering the bugs above).
+- Command Card: admin blocks (/nudge + /nudges, /adduser + /members) added
+  at the top; `/list` was missing entirely and is now on it.
+- 120 tests (49 new: parser regressions, member rename, and the first
+  pacing tests).
 
 ## v1.6.4 — 2026-07-13
 

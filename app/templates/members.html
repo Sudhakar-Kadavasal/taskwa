@@ -3,15 +3,27 @@
 {% block content %}
 <h1>Team members</h1>
 {% if err %}<div class="banner bad">{{ err }}</div>{% endif %}
+{% if note %}<div class="banner ok">{{ note }}</div>{% endif %}
 {% if imported is defined and imported >= 0 %}
 <div class="banner ok">Imported {{ imported }} member{{ '' if imported == 1 else 's' }}{% if skipped %} · {{ skipped }} skipped (already registered or no number){% endif %}.</div>
 {% endif %}
 <div class="card">
+  <p class="muted" style="margin-top:0">The name here is the one TaskWA shows —
+     in digests, in group announcements ("New task for …") and in blocker
+     alerts. It has nothing to do with your phone's contact list, so edit it to
+     whatever the team should see. Press Enter to save.</p>
   <table>
     <tr><th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th></th></tr>
     {% for m in members %}
     <tr>
-      <td>{{ m.name }}</td><td>{{ m.phone }}</td>
+      <td>
+        <form method="post" action="/members/{{ m.id }}/name" class="inline-form">
+          <input name="name" value="{{ m.name }}" maxlength="80" required
+                 style="width:170px"
+                 onblur="if(this.value.trim() && this.value !== this.defaultValue) this.form.submit()">
+        </form>
+      </td>
+      <td>{{ m.phone }}</td>
       <td>
         <form method="post" action="/members/{{ m.id }}/role" class="inline-form">
           <select name="role" onchange="this.form.submit()">
