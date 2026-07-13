@@ -335,43 +335,68 @@ cdoc.addPageTemplates([PageTemplate(id="Card",
     frames=[Frame(ML, MB, FW, PAGE_H-3.4*cm-MB)], onPage=card_page)])
 C = []
 
-C.append(Spacer(1, 6))
-C.append(P("Reply to your morning task list with the task's number + a word:", "lede"))
-C.append(Spacer(1, 4))
+C.append(Spacer(1, 3))
 
 
 def big_cmd(cmd, desc):
-    t = Table([[Paragraph(f"<font face='Mono-Bold' size=11.5>{cmd}</font>",
-                          st("bc", alignment=TA_LEFT, spaceAfter=0, leading=15)),
-                Paragraph(desc, st("bd", fontSize=9.3, leading=12.4,
+    t = Table([[Paragraph(f"<font face='Mono-Bold' size=9.6>{cmd}</font>",
+                          st("bc", alignment=TA_LEFT, spaceAfter=0, leading=12.2)),
+                Paragraph(desc, st("bd", fontSize=8.3, leading=10.6,
                                    alignment=TA_LEFT, spaceAfter=0))]],
-              colWidths=[FW*0.42, FW*0.58])
+              colWidths=[FW*0.40, FW*0.60])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), SAND),
         ("BACKGROUND", (1, 0), (1, -1), CREAM),
         ("BOX", (0, 0), (-1, -1), 0.8, LINE),
         ("LINEBEFORE", (0, 0), (0, -1), 3, ORANGE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5.5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
     ]))
-    return [t, Spacer(1, 4.5)]
+    return [t, Spacer(1, 3)]
 
 
+def band(txt):
+    """Small section rule above a block of commands."""
+    return [Spacer(1, 2),
+            Paragraph(f"<b>{txt}</b>",
+                      st("band", fontSize=8.6, leading=11, alignment=TA_LEFT,
+                         textColor=ORANGE_D, spaceAfter=2, spaceBefore=0)),
+            Spacer(1, 1)]
+
+
+C += band("ADMIN — works only when you DM the bot directly")
 for cmd, desc in [
- # --- slash commands first ---
- ("/add Fix pump @Ravi #site fri !high", "New task for Ravi, due Friday, high "
-  "priority; #site also posts + announces it in the matching group. Reply Y to "
-  "confirm — Ravi is then asked to accept it."),
+ ("/nudge 07:30 tue @Ravi.Shankar<br/>#\"Group 1\" What is the status?<br/>"
+  "/nudges", "<b>Nudger</b> — a plain message the bot sends for you, on a "
+  "schedule. Time first (24h, required), then days (mon,wed or 'daily' or omit "
+  "= every day), then who (@members / #groups), then the message — sent word "
+  "for word. Reply Y to confirm. <b>/nudges</b> lists them all, numbered; then "
+  "<b>/nudge 3 08:15 thu</b> reschedules, <b>/nudge off 3</b> · <b>on 3</b> "
+  "pauses/resumes, <b>/nudge delete 3</b> removes it."),
+ ("/adduser 971501234567 Ravi Shankar<br/>/members",
+  "Register a teammate from your phone — check the number in the Y/N prompt, a "
+  "typo would register a stranger. Always joins as a member; promoting to admin "
+  "stays on the dashboard. <b>/members</b> lists everyone with their roles."),
+]:
+    C += big_cmd(cmd, desc)
+
+C += band("EVERYONE — the task commands")
+for cmd, desc in [
+ ("/add Fix pump @Ravi #group fri !high", "New task for Ravi, due Friday, high "
+  "priority; #group also posts + announces it in that group. Reply Y to confirm "
+  "— Ravi is then asked to accept it."),
  ("/mytasks", "Your open tasks, any time."),
+ ("/list", "Every open task you're allowed to see."),
  ("/myadd", "Open tasks you created for others — with status and blocks."),
  ("/help", "The full command list (admins DM'ing the bot also get the admin set)."),
- # --- names with spaces ---
- ("@Ravi.Shankar<br/>@\"Ravi Shankar\"", "A name with a space: <b>dot it, or "
-  "quote it</b> — curly quotes from your phone are fine. <b>Groups work exactly "
-  "the same</b> (#site.b or #\"Site B\"). @Ravi or #site on their own are fine "
-  "when they match only one person / one group."),
+ # --- names and groups with spaces ---
+ ("@Ravi.Shankar<br/>@\"Ravi Shankar\"<br/>#Group.1<br/>#\"Group 1\"",
+  "A name or a group with a space in it: <b>dot it, or quote it</b> — curly "
+  "quotes from your phone are fine. Names and groups follow the same rule. "
+  "@Ravi or #group on their own are fine when they match only one person / one "
+  "group; if two match, the bot asks instead of guessing."),
  # --- status replies ---
  ("1 done", "Task 1 finished. You'll get a thumbs-up."),
  ("1 in progress", "You've started task 1."),
@@ -389,12 +414,9 @@ for cmd, desc in [
 ]:
     C += big_cmd(cmd, desc)
 
-C.append(Spacer(1, 6))
+C.append(Spacer(1, 3))
 C.append(callout("Dates for /add: <b>today · tomorrow · mon…sun · 25/07</b>   —   "
-                 "Priorities: <b>!high · !low</b>   —   A space in a name: dot it "
-                 "<b>@Ravi.Shankar</b> or quote it <b>@\"Ravi Shankar\"</b>   —   "
-                 "Only you (or an admin) can close "
-                 "your tasks.   —   Admins: DM the bot <b>/nudge · /nudges · "
-                 "/adduser · /members</b> (see the User Manual)."))
+                 "Priorities: <b>!high · !low</b>   —   Only you (or an admin) can "
+                 "close your tasks."))
 cdoc.build(C)
 print("OK card")
