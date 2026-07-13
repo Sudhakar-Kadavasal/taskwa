@@ -199,7 +199,8 @@ def setup_finish():
 
 # ---------------- tasks ----------------
 @router.get("/", response_class=HTMLResponse)
-def tasks_page(request: Request, status: str = "open", assignee: int = 0):
+def tasks_page(request: Request, status: str = "open", assignee: int = 0,
+               err: str = ""):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
@@ -217,7 +218,7 @@ def tasks_page(request: Request, status: str = "open", assignee: int = 0):
         return templates.TemplateResponse(request, "tasks.html", _ctx(
             request, s, tasks=tasks, members=members, groups=groups,
             f_status=status, f_assignee=assignee, today=date.today(),
-            priorities=PRIORITIES))
+            priorities=PRIORITIES, err=err[:200]))
 
 
 @router.post("/tasks/create")
@@ -248,14 +249,31 @@ def task_status(request: Request, task_id: int, new_status: str = Form(...),
                 note: str = Form("")):
     if (r := _guard(request)):
         return r
+    from urllib.parse import quote
+    notify = None
     with session_scope() as s:
         t = s.get(Task, task_id)
-        if t:
-            try:
-                change_status(s, t, None, new_status, note=note,
-                              channel="dashboard")
-            except Exception:
-                pass
+        if t is None:
+            return RedirectResponse("/?err=" + quote(f"No task #{task_id}."),
+                                    status_code=303)
+        try:
+            change_status(s, t, None, new_status, note=note,
+                          channel="dashboard")
+        except Exception as e:
+            # surface the reason instead of silently doing nothing
+            return RedirectResponse("/?err=" + quote(str(e)), status_code=303)
+        # parity with WhatsApp: the assignee hears about a done/cancel
+        # done on their behalf (one message, group or DM - never both)
+        if (new_status in ("done", "cancelled") and t.assignee
+                and t.assignee.role != "admin"):   # admins did it themselves
+            from .commands import _task_channel
+            verb = "closed" if new_status == "done" else "cancelled"
+            why = f" ({note.strip()})" if note.strip() else ""
+            notify = (_task_channel(s, t),
+                      f"Admin {verb} task #{t.id}: {t.title}{why} - "
+                      f"it's off your list, {t.assignee.name}.")
+    if notify:
+        waha.send_text(*notify)
     return RedirectResponse(request.headers.get("referer", "/"), status_code=303)
 
 

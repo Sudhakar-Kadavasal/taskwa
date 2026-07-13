@@ -19,6 +19,12 @@
   work never dies silently. The initiator gets one DM; no duplicate admin
   alert. Group-posted tasks skip the DM (their group's daily digest
   announces them).
+- **Dashboard: one-click Done / Cancel buttons** on every open task row
+  (Cancel asks for confirmation), alongside the existing status dropdown.
+  Failed status changes now show a red banner explaining why, instead of
+  silently doing nothing. Dashboard done/cancel also notifies the assignee
+  (one message, group or DM — admins closing their own tasks are not
+  messaged).
 - **Creators can close or cancel their own tasks**: whoever created a task
   can send "7 done" or "7 cancel <reason>" (new verb) even if it's assigned
   to someone else — the assignee gets one notice that it's off their list.

@@ -2,6 +2,7 @@
 {% block title %}Tasks{% endblock %}
 {% block content %}
 <h1>Tasks</h1>
+{% if err %}<div class="banner bad">{{ err }}</div>{% endif %}
 
 <div class="card">
   <form method="get" action="/" class="grid">
@@ -43,6 +44,17 @@
           {% endif %}</td>
       <td><span class="badge b-{{ t.status }}">{{ t.status.replace('_',' ') }}</span></td>
       <td>
+        {% if t.status not in ('done', 'cancelled') %}
+        <form method="post" action="/tasks/{{ t.id }}/status" class="inline-form">
+          <input type="hidden" name="new_status" value="done">
+          <button title="Mark done">&#10003; Done</button>
+        </form>
+        <form method="post" action="/tasks/{{ t.id }}/status" class="inline-form"
+              onsubmit="return confirm('Cancel task #{{ t.id }}: {{ t.title }}?')">
+          <input type="hidden" name="new_status" value="cancelled">
+          <button class="danger" title="Cancel task">&#10007; Cancel</button>
+        </form>
+        {% endif %}
         <form method="post" action="/tasks/{{ t.id }}/status" class="inline-form">
           <select name="new_status">
             {% for st in ['open','in_progress','blocked','done','cancelled'] %}
