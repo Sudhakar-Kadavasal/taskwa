@@ -19,6 +19,14 @@
   work never dies silently. The initiator gets one DM; no duplicate admin
   alert. Group-posted tasks skip the DM (their group's daily digest
   announces them).
+- **Creators can close or cancel their own tasks**: whoever created a task
+  can send "7 done" or "7 cancel <reason>" (new verb) even if it's assigned
+  to someone else — the assignee gets one notice that it's off their list.
+  Creators get exactly these two powers, nothing else; cancelling is
+  reserved for the creator and admins (an assignee's way out is declining,
+  not killing the task later). The dashboard already allowed both for the
+  admin. The /add receipt now reminds creators: "You created it, so you can
+  also: 7 done | 7 cancel".
 - **Blocks can now wait on a person**: "3 block waiting on @Priya" hands
   the block to Priya — she gets one message (in the task's group if it has
   one, else a DM) with "Reply: 3 unblock — when your part is done, or if

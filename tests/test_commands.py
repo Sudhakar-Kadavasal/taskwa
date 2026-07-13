@@ -289,7 +289,7 @@ def test_waiting_person_cannot_close_the_task(s, team):
     t = _task(s, team)
     handle_message(s, ravi, f"{t.id} block waiting on @Priya", admin)
     r = handle_message(s, priya, f"{t.id} done", admin)   # not her call
-    assert r.text and "unblock" in r.text
+    assert r.text and "can't move" in r.text
     assert s.get(Task, t.id).status == "blocked"
 
 
@@ -322,6 +322,60 @@ def test_digest_shows_waiting_on(s, team):
     lines = waiting_on_section([task])
     assert any("Buy cement (Ravi)" in ln for ln in lines)
     assert any(f"{t.id} unblock" in ln for ln in lines)
+
+
+# ------- creator can close or cancel their task (v1.6.3) -------
+def test_creator_marks_own_created_task_done(s, team):
+    admin, ravi, priya = team
+    # priya (a plain member) creates a task for ravi
+    t = _task(s, team, creator=priya)
+    r = handle_message(s, priya, f"{t.id} done", admin)
+    assert r.react
+    assert s.get(Task, t.id).status == "done"
+    assert len(r.extra_sends) == 1                    # ravi is told
+    cid, txt = r.extra_sends[0]
+    assert cid == "971500000002@c.us" and "closed task" in txt
+
+
+def test_creator_cancels_with_reason(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team, creator=priya)
+    r = handle_message(s, priya, f"{t.id} cancel client called it off", admin)
+    assert r.react
+    assert s.get(Task, t.id).status == "cancelled"
+    assert "client called it off" in r.extra_sends[0][1]
+
+
+def test_creator_cannot_set_other_statuses(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team, creator=priya)
+    r = handle_message(s, priya, f"{t.id} in progress", admin)
+    assert r.text and "can't move" in r.text          # scoped: done/cancel only
+    assert s.get(Task, t.id).status == "open"
+
+
+def test_assignee_cannot_cancel(s, team):
+    admin, ravi, _ = team
+    t = _task(s, team)                                # creator = admin
+    r = handle_message(s, ravi, f"{t.id} cancel", admin)
+    assert r.text and "cancel" in r.text.lower()      # refused
+    assert s.get(Task, t.id).status == "open"
+
+
+def test_admin_can_cancel_any_task(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team, creator=priya)
+    r = handle_message(s, admin, f"{t.id} cancel", admin)
+    assert r.react
+    assert s.get(Task, t.id).status == "cancelled"
+
+
+def test_uninvolved_member_still_refused(s, team):
+    admin, ravi, priya = team
+    t = _task(s, team)                                # admin -> ravi
+    r = handle_message(s, priya, f"{t.id} done", admin)
+    assert r.text and "admin" in r.text
+    assert s.get(Task, t.id).status == "open"
 
 
 # ---------------- queries ----------------

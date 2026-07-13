@@ -30,6 +30,7 @@ HELP_TEXT = (
     "1 block waiting on @Name - hand the block to that person\n"
     "1 unblock - release a block that waits on you\n"
     "1 reopen - undo a mistaken 'done'\n"
+    "1 cancel - cancel a task you created (creator/admin only)\n"
     "Just 'done' works if you have a single open task,\n"
     "or swipe-reply on a task message and type 'done'.\n"
     "/add <title> @Name [!high|!low] [today|fri|25/07]\n"
@@ -38,7 +39,7 @@ HELP_TEXT = (
     "/help - this message"
 )
 
-VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock)"
+VERB = r"(done|reopen|in\s*-?\s*progress|inprogress|wip|block(?:er|ed)?|unblock|cancel(?:led)?)"
 RE_STATUS = re.compile(rf"^\s*#?(\d+)[.):]?\s+{VERB}\b\s*(.*)$",
                        re.IGNORECASE | re.DOTALL)
 RE_BARE = re.compile(rf"^\s*{VERB}\b\s*(.*)$", re.IGNORECASE | re.DOTALL)
@@ -215,7 +216,9 @@ def _created_reply(s, t: Task, sender: Member, assignee: Member) -> Reply:
     extra = notify_assignee(s, t, sender)
     if extra:
         return Reply(text=base + f"\n{assignee.name} has been asked to "
-                                 "accept it.",
+                                 "accept it.\n\n"
+                                 f"You created it, so you can also:  "
+                                 f"{t.id} done  |  {t.id} cancel",
                      extra_sends=[extra])
     return Reply(text=base)
 
@@ -262,7 +265,24 @@ def _apply_verb(s, sender: Member, task: Task, verb: str, rest: str,
         if verb_norm == "done":
             change_status(s, task, sender, "done",
                           channel="whatsapp", raw_text=raw)
-            return Reply(react=True)
+            extra = []
+            if sender.id != task.assignee_id:    # creator/admin closed it
+                extra.append((_task_channel(s, task),
+                              f"{sender.name} closed task #{task.id}: "
+                              f"{task.title} - nothing more needed from you, "
+                              f"{task.assignee.name}."))
+            return Reply(react=True, extra_sends=extra)
+        if verb_norm in ("cancel", "cancelled"):
+            change_status(s, task, sender, "cancelled",
+                          note=rest.strip(), channel="whatsapp", raw_text=raw)
+            extra = []
+            if sender.id != task.assignee_id:
+                why = f" ({rest.strip()})" if rest.strip() else ""
+                extra.append((_task_channel(s, task),
+                              f"{sender.name} cancelled task #{task.id}: "
+                              f"{task.title}{why} - it's off your list, "
+                              f"{task.assignee.name}."))
+            return Reply(react=True, extra_sends=extra)
         if verb_norm in ("inprogress", "wip"):
             change_status(s, task, sender, "in_progress",
                           channel="whatsapp", raw_text=raw)

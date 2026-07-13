@@ -42,11 +42,14 @@ def create_task(s, *, title, assignee: Member, creator: Member | None = None,
 
 
 def can_change_status(task: Task, actor: Member) -> bool:
-    """D6: only the assignee or an admin may change status - plus the person
-    a blocked task is waiting on, who may release (only) the block."""
+    """D6: the assignee or an admin may change status; the person a blocked
+    task is waiting on may release the block; the task's creator may close
+    or cancel it. (Target-status scoping is enforced in change_status.)"""
     if actor.role == "admin" or actor.id == task.assignee_id:
         return True
-    return task.status == "blocked" and actor.id == task.waiting_on_id
+    if task.status == "blocked" and actor.id == task.waiting_on_id:
+        return True
+    return actor.id == task.creator_id
 
 
 def change_status(s, task: Task, actor: Member | None, new_status: str,
@@ -62,13 +65,25 @@ def change_status(s, task: Task, actor: Member | None, new_status: str,
         raise PermissionError_(
             f"Only {task.assignee.name} (the assignee) or an admin can update task #{task.id}.")
     if (actor is not None and actor.role != "admin"
-            and actor.id != task.assignee_id
-            and new_status not in ("in_progress", "open")):
-        # the waiting-on person may release the block, nothing more
+            and actor.id != task.assignee_id):
+        # scoped powers: waiting-on person may only release the block;
+        # the creator may only close or cancel
+        allowed_targets = set()
+        if task.status == "blocked" and actor.id == task.waiting_on_id:
+            allowed_targets |= {"in_progress", "open"}
+        if actor.id == task.creator_id:
+            allowed_targets |= {"done", "cancelled"}
+        if new_status not in allowed_targets:
+            raise PermissionError_(
+                f"You can't move task #{task.id} to "
+                f"'{new_status.replace('_', ' ')}' - only "
+                f"{task.assignee.name} (the assignee) or an admin can.")
+    if (new_status == "cancelled" and actor is not None
+            and actor.role != "admin" and actor.id != task.creator_id):
+        # cancelling is reserved: an assignee's way out is declining, not
+        # killing the task later
         raise PermissionError_(
-            f"You can unblock task #{task.id}, but only "
-            f"{task.assignee.name} (the assignee) or an admin can "
-            "close or cancel it.")
+            f"Only the creator of task #{task.id} or an admin can cancel it.")
     old = task.status
     task.status = new_status
     if new_status == "blocked":
