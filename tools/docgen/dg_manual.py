@@ -282,6 +282,15 @@ E.append(table(["Command", "What it does"],
       "role 'member' — promoting to admin stays a dashboard-only act. "
       "Re-adding an inactive number reactivates it. CHECK THE NUMBER in "
       "the Y/N prompt: a typo would register a stranger."],
+     [Paragraph("<font face='Mono-Bold'>/rename @Ravi Ravi Shankar</font>",
+                S["tcell"]),
+      "Change the name TaskWA shows for someone — the name the team reads in "
+      "group announcements ('New task for …'), digests and blocker alerts. It "
+      "is <b>not</b> your phone's contact name, and editing it here does not "
+      "touch your contacts. Y/N confirmed. Two members can never share a name: "
+      "the name is how people are addressed (@Ravi), so a duplicate would make "
+      "'@Ravi' ambiguous and work could land on the wrong person — the bot "
+      "refuses. Same thing inline on the dashboard's Members page."],
      [Paragraph("<font face='Mono-Bold'>/members</font>", S["tcell"]),
       "List everyone registered, with roles and inactive flags."],
      [Paragraph("<font face='Mono-Bold'>/help</font>", S["tcell"]),

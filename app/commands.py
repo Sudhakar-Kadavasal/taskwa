@@ -58,6 +58,7 @@ ADMIN_HELP = (
     "/nudge on|off|delete <n>\n"
     "/nudges - list all nudges\n"
     "/adduser <number> <name> - register a member\n"
+    "/rename <@who> <new name> - change the name the team sees\n"
     "/members - list registered members\n"
     "e.g. /nudge 07:30 tue @Ravi.Shankar What is the status\n"
     "     /nudge 730 tue @\"Ravi Shankar\" What is the status\n"
@@ -817,6 +818,61 @@ def _confirm_nudge_delete(s, draft: dict, accepted: bool) -> Reply:
     return Reply(text=f"Deleted nudge \"{name}\".")
 
 
+def _handle_rename_cmd(s, sender: Member, rest: str) -> Reply:
+    """/rename <@who|number> <new name> - change the name the team sees.
+
+    The target is ONE token on purpose (@Ravi, @Ravi.Shankar, @"Ravi Shankar"
+    - normalised to the dotted form upstream - or the phone number). Greedy
+    multi-word matching would fight the new name that follows it: in
+    '/rename @Ravi Ravi Shankar' there is no way to tell where the target ends
+    and the new name begins."""
+    from .engine import check_rename, clean_member_name
+    words = rest.split()
+    if len(words) < 2:
+        return Reply(text="Usage: /rename <@who> <new name>\n"
+                          "e.g.  /rename @Ravi Ravi Shankar\n"
+                          "      /rename @Ravi.Shankar Ravi S Kumar\n"
+                          "      /rename 971501234567 Ravi Shankar\n"
+                          "The name is what the team sees in group "
+                          "announcements and digests. /members lists everyone.")
+    ref = words[0].lstrip("@")
+    target = _find_member_by_ref(s, ref)
+    if target is None:
+        return Reply(text=f"I don't recognise '{words[0]}'. Use @Name (dot a "
+                          "space: @Ravi.Shankar), or the phone number. Send "
+                          "/members to see the list.")
+    new_name = clean_member_name(" ".join(words[1:]))
+    # validated BEFORE the Y/N prompt, so a duplicate is refused straight away
+    ok, err = check_rename(s, target, new_name)
+    if not ok:
+        return Reply(text=err)
+    if new_name == target.name:
+        return Reply(text=f"{target.name} is already called that.")
+    draft = {"kind": "rename", "member_id": target.id,
+             "old_name": target.name, "new_name": new_name}
+    s.query(PendingConfirm).filter(
+        PendingConfirm.member_id == sender.id).delete()
+    s.add(PendingConfirm(member_id=sender.id, draft_json=json.dumps(draft),
+                         expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    s.flush()
+    return Reply(text=f"Rename \"{draft['old_name']}\" to "
+                      f"\"{draft['new_name']}\"?\nThis is the name the team "
+                      "sees in group announcements, digests and alerts - and "
+                      f"how they address them (@{draft['new_name'].split()[0]})"
+                      ".\nReply Y to confirm, N to cancel.")
+
+
+def _confirm_rename(s, draft: dict, accepted: bool) -> Reply:
+    from .engine import rename_member
+    if not accepted:
+        return Reply(text="Cancelled - name unchanged.")
+    m = s.get(Member, draft.get("member_id"))
+    if m is None:
+        return Reply(text="That member is gone.")
+    ok, msg = rename_member(s, m, draft["new_name"])
+    return Reply(text=msg)
+
+
 def _handle_adduser_cmd(s, sender: Member, rest: str) -> Reply:
     # the number may be written with spaces/+/dashes: consume phone-like
     # tokens until the first word containing letters (= start of the name)
@@ -897,6 +953,8 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
                 return _confirm_nudge(s, sender, draft, accepted)
             if draft.get("kind") == "nudge_delete":
                 return _confirm_nudge_delete(s, draft, accepted)
+            if draft.get("kind") == "rename":
+                return _confirm_rename(s, draft, accepted)
             if draft.get("kind") == "adduser":
                 return _confirm_adduser(s, draft, accepted)
             if not accepted:
@@ -986,7 +1044,7 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
 
     # ---- admin commands: DM only, admin only ----
     if (low.startswith("/nudge") or low.startswith("/adduser")
-            or low.startswith("/members")):
+            or low.startswith("/members") or low.startswith("/rename")):
         if is_group:
             return Reply(unmatched=True)   # never discussed in groups
         if sender.role != "admin":
@@ -1006,12 +1064,17 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
             return _handle_nudge_cmd(s, sender, body[6:].strip())
         if low.startswith("/adduser"):
             return _handle_adduser_cmd(s, sender, body[8:].strip())
+        if low.startswith("/rename"):
+            return _handle_rename_cmd(s, sender, body[7:].strip())
         # /members
         members = (s.query(Member).order_by(Member.name).all())
         lines = [f"- {m.name} ({m.phone})"
                  + (" - admin" if m.role == "admin" else "")
                  + ("" if m.active else " [inactive]") for m in members]
-        return Reply(text="*Members:*\n" + "\n".join(lines))
+        return Reply(text="*Members:*\n" + "\n".join(lines)
+                          + "\n\n/rename <@who> <new name> - change the name "
+                            "the team sees\n/adduser <number> <name> - add "
+                            "someone")
 
     # ---- /myadd: open tasks I created ----
     if low.startswith("/myadd"):

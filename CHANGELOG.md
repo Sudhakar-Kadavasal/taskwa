@@ -84,6 +84,12 @@
   while "Ravi Shankar" exists and the banner warns that `@Ravi` is now
   ambiguous — the bot asks for the full name rather than guessing. Annoying,
   never wrong.
+- **`/rename <@who> <new name>`** — the same rename over WhatsApp (admin-only,
+  DM-only, Y/N confirmed), sharing the engine's duplicate guard: a clashing
+  name is refused *before* the confirmation is even offered. The target is one
+  token (`@Ravi`, `@Ravi.Shankar`, `@"Ravi Shankar"` or the phone number) —
+  greedy multi-word matching would have no way to tell where the target ends
+  and the new name begins. `/members` now points at it.
 - **Fix: `/adduser` reactivation overwrote a curated name.** Re-adding a
   deactivated number replaced the stored name with whatever was typed. It now
   keeps the stored name and says so.
@@ -110,8 +116,8 @@
   the `/nudge` row now states that the time is required.
 - Command Card: admin blocks (/nudge + /nudges, /adduser + /members) added
   at the top; `/list` was missing entirely and is now on it.
-- 120 tests (49 new: parser regressions, member rename, and the first
-  pacing tests).
+- 126 tests (55 new: parser regressions, member rename (dashboard +
+  /rename), and the first pacing tests).
 
 ## v1.6.4 — 2026-07-13
 

@@ -855,6 +855,69 @@ def test_rename_rejects_empty_and_trims(s, team):
     assert ok and s.get(Member, ravi.id).name == "Ravi Shankar"
 
 
+def test_rename_command_over_whatsapp(s, team, grp, monkeypatch):
+    admin, ravi, _ = team
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    r = handle_message(s, admin, "/rename @Ravi Ravi Shankar", admin)
+    assert "Rename \"Ravi\" to \"Ravi Shankar\"?" in r.text
+    assert s.get(Member, ravi.id).name == "Ravi"      # nothing yet
+    r2 = handle_message(s, admin, "y", admin)
+    assert "Renamed Ravi to Ravi Shankar" in r2.text
+    assert s.get(Member, ravi.id).name == "Ravi Shankar"
+    # and the team sees it
+    handle_message(s, admin, "/add Fix pump @Ravi.Shankar #site.b", admin)
+    r3 = handle_message(s, admin, "y", admin)
+    assert "New task for Ravi Shankar" in r3.extra_sends[0][1]
+
+
+def test_rename_command_by_phone_and_quoted_name(s, team):
+    admin, ravi, priya = team
+    handle_message(s, admin, f"/rename {ravi.phone} Ravi Shankar", admin)
+    handle_message(s, admin, "y", admin)
+    assert s.get(Member, ravi.id).name == "Ravi Shankar"
+    # quoted target (curly quotes included - normalised upstream)
+    handle_message(s, admin, '/rename @“Ravi Shankar” Ravi S Kumar', admin)
+    handle_message(s, admin, "y", admin)
+    assert s.get(Member, ravi.id).name == "Ravi S Kumar"
+
+
+def test_rename_command_refuses_duplicate_before_asking(s, team):
+    admin, ravi, priya = team
+    r = handle_message(s, admin, "/rename @Ravi Priya", admin)
+    assert "already used by" in r.text
+    assert "Reply Y" not in r.text            # never even offered
+    assert s.get(Member, ravi.id).name == "Ravi"
+    # and no confirmation is left dangling
+    r2 = handle_message(s, admin, "y", admin)
+    assert r2.unmatched or "Renamed" not in (r2.text or "")
+
+
+def test_rename_command_n_cancels(s, team):
+    admin, ravi, _ = team
+    handle_message(s, admin, "/rename @Ravi Ravi Shankar", admin)
+    r = handle_message(s, admin, "n", admin)
+    assert "Cancelled" in r.text
+    assert s.get(Member, ravi.id).name == "Ravi"
+
+
+def test_rename_command_unknown_target_and_usage(s, team):
+    admin, _, _ = team
+    r = handle_message(s, admin, "/rename @Nobody New Name", admin)
+    assert "don't recognise" in r.text
+    r2 = handle_message(s, admin, "/rename @Ravi", admin)
+    assert "Usage" in r2.text
+
+
+def test_rename_is_admin_only_and_dm_only(s, team):
+    admin, ravi, _ = team
+    r = handle_message(s, ravi, "/rename @Priya Priya K", admin)
+    assert "admin command" in r.text
+    r2 = handle_message(s, admin, "/rename @Ravi Ravi S", admin,
+                        is_group=True, group_id=1)
+    assert r2.unmatched
+    assert s.get(Member, ravi.id).name == "Ravi"
+
+
 def test_adduser_reactivation_keeps_the_curated_name(s, team):
     """Re-adding a deactivated member must not silently overwrite the name
     that was set on the dashboard."""

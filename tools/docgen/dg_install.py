@@ -376,10 +376,13 @@ for cmd, desc in [
   "word. Reply Y to confirm. <b>/nudges</b> lists them all, numbered; then "
   "<b>/nudge 3 08:15 thu</b> reschedules, <b>/nudge off 3</b> · <b>on 3</b> "
   "pauses/resumes, <b>/nudge delete 3</b> removes it."),
- ("/adduser 971501234567 Ravi Shankar<br/>/members",
+ ("/adduser 971501234567 Ravi Shankar<br/>/rename @Ravi Ravi Shankar<br/>"
+  "/members",
   "Register a teammate from your phone — check the number in the Y/N prompt, a "
   "typo would register a stranger. Always joins as a member; promoting to admin "
-  "stays on the dashboard. <b>/members</b> lists everyone with their roles."),
+  "stays on the dashboard. <b>/rename</b> changes the name the team sees (in "
+  "group announcements and digests) — two people can never share a name. "
+  "<b>/members</b> lists everyone with their roles."),
 ]:
     C += big_cmd(cmd, desc)
 

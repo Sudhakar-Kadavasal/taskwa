@@ -1,6 +1,8 @@
 """Task engine: creation, status transitions, permissions, audit trail."""
 from datetime import datetime, date
 
+from sqlalchemy import func
+
 from .models import (DigestRef, GroupDigestRef, Task, Member,
                      StatusEvent, STATUSES, PRIORITIES)
 
@@ -161,38 +163,52 @@ def resolve_ref(s, member: Member, num: int,
     return s.get(Task, num)
 
 
-def rename_member(s, member: Member, new_name: str) -> tuple[bool, str]:
-    """Rename a member. Returns (ok, message).
+def clean_member_name(raw: str) -> str:
+    return " ".join(str(raw or "").split())[:80]
+
+
+def check_rename(s, member: Member, new_name: str) -> tuple[bool, str]:
+    """Validate a rename WITHOUT applying it - so a command can refuse before
+    it even asks for a Y/N confirmation. Returns (ok, error_text).
 
     The name is an ADDRESSING KEY, not a label: '@Ravi' is resolved against it.
-    So a duplicate is refused outright - two members with the same name would
-    make '@Ravi' resolve to an arbitrary one of them, and a task would land on
-    the wrong person with no error anywhere. Checked against every member,
-    active or not, so reactivating someone later can't create the collision.
-
-    A PREFIX clash ('Ravi' vs 'Ravi Shankar') is allowed but reported: it only
-    costs the '@Ravi' shorthand, which then refuses to guess and asks for the
-    full (dotted or quoted) name. Annoying, never wrong."""
-    name = " ".join(str(new_name or "").split())[:80]
+    A duplicate is refused outright - two members with the same name would make
+    '@Ravi' resolve to an arbitrary one of them, and a task would land on the
+    wrong person with no error anywhere. Checked against every member, active
+    or not, so reactivating someone later can't create the collision either."""
+    name = clean_member_name(new_name)
     if not name:
         return False, "A name can't be empty."
-    if name.lower() == member.name.lower() and name == member.name:
-        return True, ""
-    others = s.query(Member).filter(Member.id != member.id).all()
-    clash = next((m for m in others if m.name.lower() == name.lower()), None)
+    clash = (s.query(Member)
+              .filter(Member.id != member.id,
+                      func.lower(Member.name) == name.lower()).first())
     if clash:
         state = "" if clash.active else " (deactivated)"
         return False, (f"'{name}' is already used by {clash.phone}{state}. "
                        "Two members cannot share a name - '@" + name.split()[0]
                        + "' would become ambiguous and tasks could go to the "
                          "wrong person. Pick a different name.")
+    return True, ""
+
+
+def rename_member(s, member: Member, new_name: str) -> tuple[bool, str]:
+    """Rename a member. Returns (ok, message). Refuses duplicates.
+
+    A PREFIX clash ('Ravi Kumar' alongside 'Ravi Shankar') is allowed but
+    reported: it only costs the '@Ravi' shorthand, which then refuses to guess
+    and asks for the full (dotted or quoted) name. Annoying, never wrong."""
+    ok, err = check_rename(s, member, new_name)
+    if not ok:
+        return False, err
+    name = clean_member_name(new_name)
     old, member.name = member.name, name
     # Would the short form '@Ravi' now match more than one person? That is the
     # clash that costs the shorthand - not whether one full name prefixes
-    # another. Allowed: the bot refuses to guess, so nothing goes astray.
+    # another.
     first = name.split()[0].lower()
-    also = [m.name for m in others
-            if m.active and m.name.lower().startswith(first)]
+    also = [m.name for m in s.query(Member)
+            .filter(Member.id != member.id, Member.active.is_(True)).all()
+            if m.name.lower().startswith(first)]
     if also:
         return True, (f"Renamed {old} to {name}. Note: {', '.join(also)} also "
                       f"starts with '{name.split()[0]}', so the short form "
