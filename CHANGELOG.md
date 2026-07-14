@@ -67,6 +67,33 @@
   planner, the throttle under concurrent batches, and a guard that
   `paced_send` isn't a whole-batch lock. This was the repo's known test debt.
 
+### "Which one?" - ambiguous names are asked about, never guessed
+
+- **A tag that matches two people now produces a numbered list**, not an error:
+
+      '@Ravi' matches 2 people:
+        1. Ravi Shankar  (...0002)
+        2. Ravi Kumar    (...0045)
+      Reply with the number.
+
+  Reply `2` and the **original command is re-run** with that person spelled out
+  unambiguously (`@Ravi` → `@971500000045`), so it keeps its normal parsing,
+  confirmation and permission path — the title, date and priority all survive
+  the detour, and a second ambiguous tag in the same command simply asks again.
+  Works in `/add`, `/nudge`, `block waiting on @…` and `/rename`, and for
+  `#groups` (which used to just refuse).
+- **Typo rescue:** `@Rvai` matches nobody, so the bot offers the closest names
+  ("Did you mean: 1. Ravi Shankar …"). Never auto-selected — you always type
+  the number — and the last 4 digits of each phone are shown so two same-named
+  people can be told apart. A real stranger (`@Zxqwerty`) is still just refused.
+  Similarity cutoff is one constant (`FUZZY_CUTOFF`) if it ever offers junk.
+- **Only a bare number answers the question.** `2 done` still means "task 2,
+  done"; anything else drops the question and is read as a new message. The
+  previous behaviour — "I don't recognise '@Ravi'" when it recognised it
+  perfectly well and simply couldn't choose — is gone.
+- `block waiting on @Ravi` now resolves the name **before** applying the block,
+  so an ambiguous name leaves the task untouched until you've picked.
+
 ### Members
 
 - **A member's name can now be edited** on the Members page (inline, saves on
@@ -116,8 +143,8 @@
   the `/nudge` row now states that the time is required.
 - Command Card: admin blocks (/nudge + /nudges, /adduser + /members) added
   at the top; `/list` was missing entirely and is now on it.
-- 126 tests (55 new: parser regressions, member rename (dashboard +
-  /rename), and the first pacing tests).
+- 135 tests (64 new: parser regressions, the disambiguation picker, member
+  rename (dashboard + /rename), and the first pacing tests).
 
 ## v1.6.4 — 2026-07-13
 

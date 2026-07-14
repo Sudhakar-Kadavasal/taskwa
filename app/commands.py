@@ -14,6 +14,7 @@ digest (global task serials also work as fallback):
   /mytasks   /list   /help     y / n confirms or cancels a pending /add
 """
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 
@@ -21,6 +22,8 @@ from .engine import (InvalidTransition, PermissionError_, change_status,
                      create_task, open_tasks_for, resolve_ref,
                      save_digest_refs, sort_tasks)
 from .models import Group, Member, PendingConfirm, StatusEvent, Task
+
+log = logging.getLogger("commands")
 
 HELP_TEXT = (
     "*Task bot - commands*\n"
@@ -35,7 +38,8 @@ HELP_TEXT = (
     "@Ravi.Shankar   - a dot stands for the space\n"
     "@\"Ravi Shankar\"   - quotes work too\n"
     "#site.b or #\"Site B\"   - same for group names\n"
-    "@Ravi alone is fine when it matches one person.\n"
+    "@Ravi alone is fine when it matches one person; if it\n"
+    "matches two, the bot lists them and you reply 1 or 2.\n"
     "\n"
     "*Task updates* - 1 is your digest number\n"
     "1 done - close task 1\n"
@@ -73,6 +77,9 @@ RE_BARE = re.compile(rf"^\s*{VERB}\b\s*(.*)$", re.IGNORECASE | re.DOTALL)
 RE_ADD = re.compile(r"^\s*/add\s+(.+)$", re.IGNORECASE | re.DOTALL)
 RE_YES = re.compile(r"^\s*(y|yes)\s*$", re.IGNORECASE)
 RE_NO = re.compile(r"^\s*(n|no)\s*$", re.IGNORECASE)
+# answer to a "which one?" list - a BARE number and nothing else, so that
+# "2 done" keeps meaning "task 2, done" even while a pick is pending
+RE_BARE_NUM = re.compile(r"^\s*(\d{1,2})[.)]?\s*$")
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
             "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
@@ -114,12 +121,15 @@ class Reply:
     (e.g. notifying an assignee) - each still vetted by the send allowlist."""
     def __init__(self, text: str | None = None, react: bool = False,
                  alert_admin: str | None = None, unmatched: bool = False,
-                 extra_sends: list | None = None):
+                 extra_sends: list | None = None, ambiguity=None):
         self.text = text
         self.react = react
         self.alert_admin = alert_admin
         self.unmatched = unmatched
         self.extra_sends = extra_sends or []
+        # set when a tag inside a status reply ('3 block waiting on @Ravi')
+        # matched several people - the dispatcher turns it into the question
+        self.ambiguity = ambiguity
 
 
 def _serial_footer(serial: int) -> str:
@@ -375,6 +385,151 @@ def _find_member_by_name(s, name: str) -> Member | None:
 # ('@Ravi shankar' typed without the dot).
 MAX_NAME_WORDS = 4
 
+# --- disambiguation ------------------------------------------------------
+# When a tag matches more than one person (or nobody, but something close),
+# the bot must never guess: it lists the candidates and asks for a number.
+FUZZY_CUTOFF = 0.72     # tighten if typo-rescue starts offering junk
+MAX_CANDIDATES = 5
+
+
+class Ambiguity:
+    """A tag that could mean several people/groups (or nobody, but something
+    close). Returned in the error slot of the parsers; the dispatcher turns it
+    into the numbered question. Never resolved by guessing."""
+    def __init__(self, token: str, kind: str, candidates: list, how: str):
+        self.token = token          # exactly as typed, e.g. '@Ravi'
+        self.kind = kind            # 'member' | 'group'
+        self.candidates = candidates
+        self.how = how              # 'prefix' | 'fuzzy'
+
+
+def _norm_ref(ref: str) -> str:
+    return re.sub(r"\s+", " ", str(ref or "").replace(".", " ")).strip().lower()
+
+
+def member_candidates(s, ref: str) -> tuple[list, str]:
+    """Who could '@ref' mean? Returns (candidates, how).
+
+    how = 'exact'  - one unambiguous hit (len 1)
+          'prefix' - several names start with what was typed
+          'fuzzy'  - nothing matched, but these are close (a typo)
+          'none'   - nothing at all
+
+    Never decides between candidates: that is the caller's job, via the user."""
+    import difflib
+    name = _norm_ref(ref)
+    if not name:
+        return [], "none"
+    members = s.query(Member).filter(Member.active.is_(True)).all()
+    exact = [m for m in members if m.name.lower() == name]
+    if exact:
+        return exact[:1], "exact"
+    prefix = [m for m in members if m.name.lower().startswith(name)]
+    if len(prefix) == 1:
+        return prefix, "exact"
+    if prefix:
+        return prefix[:MAX_CANDIDATES], "prefix"
+    # nothing starts with it - is it a typo? '@Rvai' -> Ravi Shankar.
+    # Also catch a middle/last name being used on its own ('@Shankar').
+    inside = [m for m in members if name in m.name.lower()]
+    if len(inside) == 1:
+        return inside, "exact"
+    if inside:
+        return inside[:MAX_CANDIDATES], "prefix"
+    by_name = {m.name.lower(): m for m in members}
+    close = difflib.get_close_matches(name, list(by_name), n=MAX_CANDIDATES,
+                                      cutoff=FUZZY_CUTOFF)
+    # a typo in the FIRST word is the common case ('@Rvai Shankar')
+    first_words = {}
+    for m in members:
+        first_words.setdefault(m.name.split()[0].lower(), []).append(m)
+    close_first = difflib.get_close_matches(name.split()[0], list(first_words),
+                                            n=MAX_CANDIDATES,
+                                            cutoff=FUZZY_CUTOFF)
+    out, seen = [], set()
+    for key in close:
+        m = by_name[key]
+        if m.id not in seen:
+            out.append(m); seen.add(m.id)
+    for key in close_first:
+        for m in first_words[key]:
+            if m.id not in seen:
+                out.append(m); seen.add(m.id)
+    return (out[:MAX_CANDIDATES], "fuzzy") if out else ([], "none")
+
+
+def group_candidates(s, ref: str) -> tuple[list, str]:
+    """Same, for a #tag. Substring match, as _match_group has always done."""
+    from .models import Group
+    name = _norm_ref(ref)
+    groups = s.query(Group).filter(Group.active.is_(True)).all()
+    if not name:
+        return [], "none"
+    hits = [g for g in groups if name in g.name.lower()]
+    if len(hits) == 1:
+        return hits, "exact"
+    if hits:
+        return hits[:MAX_CANDIDATES], "prefix"
+    import difflib
+    by_name = {g.name.lower(): g for g in groups}
+    close = difflib.get_close_matches(name, list(by_name), n=MAX_CANDIDATES,
+                                      cutoff=FUZZY_CUTOFF)
+    out = [by_name[k] for k in close]
+    return (out, "fuzzy") if out else ([], "none")
+
+
+def _member_problem(s, token: str):
+    """An @token didn't resolve. Ambiguity (ask which one) or a plain error."""
+    cands, how = member_candidates(s, token.lstrip("@"))
+    if how in ("prefix", "fuzzy") and len(cands) > 1:
+        return Ambiguity(token, "member", cands, how)
+    if how == "fuzzy" and len(cands) == 1:
+        return Ambiguity(token, "member", cands, how)   # "did you mean X?"
+    return (f"I don't recognise '{token}' as a team member. If the name has a "
+            "space, dot it (@Ravi.Shankar) or quote it (@\"Ravi Shankar\"). "
+            "Send /members to see the list.")
+
+
+def _group_problem(s, token: str):
+    """Same for a #tag."""
+    cands, how = group_candidates(s, token.lstrip("#"))
+    if how in ("prefix", "fuzzy") and cands:
+        return Ambiguity(token, "group", cands, how)
+    from .models import Group
+    groups = s.query(Group).filter(Group.active.is_(True)).all()
+    return (f"No registered group matches '{token}'. Registered groups: "
+            + (", ".join(g.name for g in groups) or "none") + ".")
+
+
+def _pick_reply(s, sender: Member, raw_body: str, token: str,
+                candidates: list, how: str, kind: str) -> Reply:
+    """Park the command and ask which one. The user answers with a bare number;
+    handle_message then rewrites the ORIGINAL command with the chosen
+    member/group spelled out unambiguously and re-runs it - so every command
+    keeps its normal parsing, confirmation and permission path."""
+    lead = (f"'{token}' matches {len(candidates)} "
+            + ("people" if kind == "member" else "groups") + ":"
+            if how == "prefix" else
+            f"I don't have anyone called '{token.lstrip('@#')}'. Did you mean:"
+            if kind == "member" else
+            f"No group matches '{token.lstrip('#')}'. Did you mean:")
+    lines = [lead]
+    for n, c in enumerate(candidates, 1):
+        # last 4 digits: enough to tell two people apart, not a number dump
+        detail = f"  (...{c.phone[-4:]})" if kind == "member" else ""
+        lines.append(f"  {n}. {c.name}{detail}")
+    lines.append("")
+    lines.append("Reply with the number. Anything else cancels this and is "
+                 "read as a new message.")
+    draft = {"kind": "pick", "what": kind, "raw": raw_body, "token": token,
+             "ids": [c.id for c in candidates]}
+    s.query(PendingConfirm).filter(
+        PendingConfirm.member_id == sender.id).delete()
+    s.add(PendingConfirm(member_id=sender.id, draft_json=json.dumps(draft),
+                         expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    s.flush()
+    return Reply(text="\n".join(lines))
+
 
 def _is_option_token(w: str) -> bool:
     """A token that belongs to the schedule/option grammar, never to a name."""
@@ -454,19 +609,25 @@ def _apply_verb(s, sender: Member, task: Task, verb: str, rest: str,
                 return Reply(text="Please include the reason: "
                                   "block <what you're stuck on>")
             reason = rest.strip()
-            change_status(s, task, sender, "blocked", note=reason,
-                          channel="whatsapp", raw_text=raw)
-            alert = (f"[!] Blocker on task #{task.id} '{task.title}'\n"
-                     f"By: {sender.name}\nReason: {reason}")
             # "block waiting on @Priya" -> hand the block to that person.
-            # Names may be dotted (@Ravi.Shankar), quoted (normalised to the
-            # dotted form upstream) or spaced (@Ravi Shankar - joined greedily).
-            extra = []
+            # Names may be dotted (@Ravi.Shankar), quoted (normalised upstream)
+            # or spaced (@Ravi Shankar - joined greedily). Resolved BEFORE the
+            # status change: if the name is ambiguous we ask which one, and the
+            # block must not already be recorded when the command re-runs.
             rwords = reason.split()
             at = next((k for k, w in enumerate(rwords)
                        if re.match(r"^@([A-Za-z][\w.]*|\d{6,20})", w)), None)
             waited = _resolve_member_run(s, rwords, at)[0] if at is not None \
                 else None
+            if at is not None and waited is None:
+                prob = _member_problem(s, rwords[at])
+                if isinstance(prob, Ambiguity):
+                    return Reply(ambiguity=prob)
+            change_status(s, task, sender, "blocked", note=reason,
+                          channel="whatsapp", raw_text=raw)
+            alert = (f"[!] Blocker on task #{task.id} '{task.title}'\n"
+                     f"By: {sender.name}\nReason: {reason}")
+            extra = []
             if waited and waited.active and waited.id != sender.id:
                 task.waiting_on_id = waited.id
                 extra.append(_waiting_notice(s, task, sender, waited))
@@ -512,7 +673,9 @@ def _tasks_in_quote(s, sender: Member, quoted: str,
     return list(found.values())
 
 
-def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
+def _parse_add(s, body: str, sender: Member):
+    """Returns (draft, error). The error may be an Ambiguity - the caller turns
+    that into the numbered "which one?" question."""
     text = body.strip()
     priority = "medium"
     for token, val in (("!high", "high"), ("!medium", "medium"),
@@ -527,7 +690,7 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
     if gi is not None:
         tag_group, gnxt, gerr = _resolve_group_run(s, words, gi)
         if gerr:
-            return None, gerr
+            return None, _group_problem(s, words[gi])
         words = words[:gi] + words[gnxt:]
     assignee = sender
     at = next((k for k, w in enumerate(words)
@@ -535,10 +698,7 @@ def _parse_add(s, body: str, sender: Member) -> tuple[dict | None, str | None]:
     if at is not None:
         found, nxt = _resolve_member_run(s, words, at)
         if not found:
-            return None, (f"I don't recognise '{words[at]}' as a team member. "
-                          "If the name has a space, dot it (@Ravi.Shankar) or "
-                          "quote it (@\"Ravi Shankar\"). Otherwise check they "
-                          "are registered.")
+            return None, _member_problem(s, words[at])
         assignee = found
         words = words[:at] + words[nxt:]
     due = None
@@ -642,10 +802,7 @@ def _parse_schedule_tokens(s, words):
         if w.startswith("@") and len(w) > 1:
             m, nxt = _resolve_member_run(s, words, i)
             if not m:
-                return None, None, (
-                    f"I don't recognise '{w}' as a team member. If the name "
-                    "has a space, dot it (@Ravi.Shankar) or quote it "
-                    "(@\"Ravi Shankar\"). Send /members to see the list.")
+                return None, None, _member_problem(s, w)
             out["member_ids"].append(m.id)
             out["recipient_names"].append(m.name)
             i = nxt
@@ -653,7 +810,7 @@ def _parse_schedule_tokens(s, words):
         if w.startswith("#") and len(w) > 1:
             g, nxt, gerr = _resolve_group_run(s, words, i)
             if gerr:
-                return None, None, gerr
+                return None, None, _group_problem(s, w)
             out["group_ids"].append(g.id)
             out["recipient_names"].append(g.name)
             i = nxt
@@ -679,8 +836,9 @@ def _nudge_summary(s, b) -> str:
     return f"{sched} -> {', '.join(names) or 'nobody'} [{state}]"
 
 
-def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
-    """/nudge …  - create, reschedule, on/off, delete."""
+def _handle_nudge_cmd(s, sender: Member, rest: str, raw: str = "") -> Reply:
+    """/nudge …  - create, reschedule, on/off, delete. `raw` is the original
+    message, kept so an ambiguous @name can park it and re-run it on the pick."""
     from .models import Broadcast
     words = _join_ampm(rest.split())   # before the id check: '7 am' is a time
     if not words:
@@ -718,6 +876,9 @@ def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
         if b is None:
             return Reply(text=f"There is no nudge {words[0]}. Send /nudges.")
         opts, remaining, err = _parse_schedule_tokens(s, words[1:])
+        if isinstance(err, Ambiguity):
+            return _pick_reply(s, sender, raw, err.token, err.candidates,
+                               err.how, err.kind)
         if err:
             return Reply(text=err)
         if remaining:
@@ -742,6 +903,9 @@ def _handle_nudge_cmd(s, sender: Member, rest: str) -> Reply:
                           + _nudge_summary(s, b))
     # --- create ---
     opts, remaining, err = _parse_schedule_tokens(s, words)
+    if isinstance(err, Ambiguity):
+        return _pick_reply(s, sender, raw, err.token, err.candidates,
+                           err.how, err.kind)
     if err:
         return Reply(text=err)
     message = " ".join(remaining).strip()
@@ -818,7 +982,7 @@ def _confirm_nudge_delete(s, draft: dict, accepted: bool) -> Reply:
     return Reply(text=f"Deleted nudge \"{name}\".")
 
 
-def _handle_rename_cmd(s, sender: Member, rest: str) -> Reply:
+def _handle_rename_cmd(s, sender: Member, rest: str, raw: str = "") -> Reply:
     """/rename <@who|number> <new name> - change the name the team sees.
 
     The target is ONE token on purpose (@Ravi, @Ravi.Shankar, @"Ravi Shankar"
@@ -838,9 +1002,11 @@ def _handle_rename_cmd(s, sender: Member, rest: str) -> Reply:
     ref = words[0].lstrip("@")
     target = _find_member_by_ref(s, ref)
     if target is None:
-        return Reply(text=f"I don't recognise '{words[0]}'. Use @Name (dot a "
-                          "space: @Ravi.Shankar), or the phone number. Send "
-                          "/members to see the list.")
+        prob = _member_problem(s, words[0])
+        if isinstance(prob, Ambiguity):
+            return _pick_reply(s, sender, raw, prob.token, prob.candidates,
+                               prob.how, prob.kind)
+        return Reply(text=prob)
     new_name = clean_member_name(" ".join(words[1:]))
     # validated BEFORE the Y/N prompt, so a duplicate is refused straight away
     ok, err = check_rename(s, target, new_name)
@@ -926,6 +1092,39 @@ def _confirm_adduser(s, draft: dict, accepted: bool) -> Reply:
                       "if needed.")
 
 
+def _verb_reply(s, sender: Member, body: str, r: Reply) -> Reply:
+    """A status reply whose @name was ambiguous asks which one instead. The
+    status change has NOT been applied - the whole command re-runs on the pick."""
+    if r.ambiguity is not None:
+        a = r.ambiguity
+        return _pick_reply(s, sender, body, a.token, a.candidates, a.how,
+                           a.kind)
+    return r
+
+
+def _apply_pick(s, sender: Member, draft: dict, chosen_id: int,
+                admin, is_group, quoted, group_id) -> Reply:
+    """The user picked a number. Rewrite the ORIGINAL command with that person
+    (or group) spelled out unambiguously, and run it again through the normal
+    dispatcher - so the command keeps its usual parsing, confirmation and
+    permission checks, and a second ambiguous tag in the same command simply
+    asks again."""
+    if draft["what"] == "member":
+        chosen = s.get(Member, chosen_id)
+        if chosen is None or not chosen.active:
+            return Reply(text="That person is no longer registered.")
+        replacement = "@" + chosen.phone          # never ambiguous
+    else:
+        chosen = s.get(Group, chosen_id)
+        if chosen is None or not chosen.active:
+            return Reply(text="That group is no longer registered.")
+        replacement = "#" + chosen.name.replace(" ", ".")
+    rewritten = draft["raw"].replace(draft["token"], replacement, 1)
+    log.info("pick: %r -> %r", draft["raw"], rewritten)
+    return handle_message(s, sender, rewritten, admin, is_group=is_group,
+                          quoted=quoted, group_id=group_id)
+
+
 def handle_message(s, sender: Member, body: str, admin: Member | None,
                    is_group: bool = False, quoted: str = "",
                    group_id: int | None = None) -> Reply:
@@ -943,6 +1142,21 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
     if pending:
         if pending.expires_at < datetime.utcnow():
             s.delete(pending)
+        elif json.loads(pending.draft_json).get("kind") == "pick":
+            # "which Ravi?" - a BARE number answers it. Anything else (even
+            # '2 done') is a normal message: the pick is dropped, not guessed.
+            draft = json.loads(pending.draft_json)
+            s.delete(pending)
+            s.flush()
+            if RE_BARE_NUM.match(body):
+                n = int(body.strip())
+                ids = draft["ids"]
+                if not 1 <= n <= len(ids):
+                    return Reply(text=f"There's no {n} on that list. Send the "
+                                      "command again.")
+                return _apply_pick(s, sender, draft, ids[n - 1], admin,
+                                   is_group, quoted, group_id)
+            # fall through: re-parse this message from scratch
         elif RE_YES.match(body) or RE_NO.match(body):
             draft = json.loads(pending.draft_json)
             s.delete(pending)
@@ -989,7 +1203,8 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
         if task is None:
             return Reply(text=f"There is no task {num}. "
                               "Send /mytasks to see yours.")
-        return _apply_verb(s, sender, task, verb, rest, body)
+        return _verb_reply(s, sender, body,
+                          _apply_verb(s, sender, task, verb, rest, body))
 
     # ---- bare status update: "done", "block waiting on quote" ----
     m = RE_BARE.match(body)
@@ -999,14 +1214,16 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
         if quoted:
             qtasks = _tasks_in_quote(s, sender, quoted, group_id)
             if len(qtasks) == 1:
-                return _apply_verb(s, sender, qtasks[0], verb, rest, body)
+                return _verb_reply(s, sender, body, _apply_verb(
+                    s, sender, qtasks[0], verb, rest, body))
             if len(qtasks) > 1:
                 return Reply(text="That message lists several tasks - reply "
                                   "with the number, e.g. '1 done'.")
         # 2) exactly one open task: no number needed
         mine = open_tasks_for(s, sender)
         if len(mine) == 1:
-            return _apply_verb(s, sender, mine[0], verb, rest, body)
+            return _verb_reply(s, sender, body, _apply_verb(
+                s, sender, mine[0], verb, rest, body))
         if len(mine) == 0:
             return Reply(text="You have no open tasks.", unmatched=True)
         # 3) ambiguous - ask for the number (suppressed in group/personal
@@ -1019,6 +1236,9 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
     m = RE_ADD.match(body)
     if m:
         draft, err = _parse_add(s, m.group(1), sender)
+        if isinstance(err, Ambiguity):
+            return _pick_reply(s, sender, body, err.token, err.candidates,
+                               err.how, err.kind)
         if err:
             return Reply(text=err)
         if group_id is not None:           # created in a group -> posts there
@@ -1061,11 +1281,11 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
                               + "\n\n/nudge on|off|delete <n> - manage\n"
                                 "/nudge <n> <time/days/@/#> - reschedule")
         if low.startswith("/nudge"):
-            return _handle_nudge_cmd(s, sender, body[6:].strip())
+            return _handle_nudge_cmd(s, sender, body[6:].strip(), raw=body)
         if low.startswith("/adduser"):
             return _handle_adduser_cmd(s, sender, body[8:].strip())
         if low.startswith("/rename"):
-            return _handle_rename_cmd(s, sender, body[7:].strip())
+            return _handle_rename_cmd(s, sender, body[7:].strip(), raw=body)
         # /members
         members = (s.query(Member).order_by(Member.name).all())
         lines = [f"- {m.name} ({m.phone})"

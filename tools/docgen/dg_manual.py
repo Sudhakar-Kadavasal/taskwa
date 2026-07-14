@@ -128,6 +128,32 @@ E.append(Spacer(1, 4))
 E.append(P("Tapping WhatsApp's own @-mention picker always works as well — the bot "
            "resolves the number behind it."))
 
+E.append(P("Two people with similar names? The bot asks", "h2"))
+E.append(P("If what you typed could mean more than one person, the bot does not "
+           "guess — <b>it lists them and asks you to pick a number</b>. The same "
+           "happens if you mistype a name (it offers the closest matches), and if "
+           "a <font face='Mono'>#tag</font> matches two groups."))
+E.append(chat_bubble(["/add Fix the pump @Ravi tomorrow !high"], sender="me",
+                     width=FW*0.62))
+E.append(chat_bubble(["'@Ravi' matches 2 people:",
+                      "  1. Ravi Shankar  (...0002)",
+                      "  2. Ravi Kumar  (...0045)",
+                      "",
+                      "Reply with the number. Anything else cancels this",
+                      "and is read as a new message."], width=FW*0.72))
+E.append(chat_bubble(["2"], sender="me", width=FW*0.2))
+E.append(chat_bubble(['Create task: "Fix the pump" -> Ravi Kumar,',
+                      "due Wed 15 Jul, high priority?",
+                      "Reply Y to confirm, N to cancel."], width=FW*0.62))
+E.append(Spacer(1, 4))
+E.append(P("The rest of your message survives the detour — the title, the date and "
+           "the priority are all carried through, and you carry on with the normal "
+           "<font face='Mono-Bold'>Y</font>. The last four digits of each number are "
+           "shown so you can tell two same-named people apart. <b>Only a bare number "
+           "answers the question</b>: <font face='Mono-Bold'>2 done</font> still means "
+           "'task 2 is done', and anything else simply drops the question and is read "
+           "as a new message."))
+
 E.append(P("When a task is created FOR you", "h2"))
 E.append(P("The moment someone assigns you a task, you get a message — no waiting for "
            "tomorrow's digest:"))

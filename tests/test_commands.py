@@ -407,11 +407,19 @@ def test_add_with_group_tag_announces_on_y(s, team, grp, monkeypatch):
     assert "New task for Ravi" in txt and f"{t.id} done" in txt
 
 
-def test_add_group_tag_ambiguous_refused(s, team, grp):
+def test_add_group_tag_ambiguous_asks_which_one(s, team, grp, monkeypatch):
+    """v1.6.5: an ambiguous tag is no longer refused - it asks."""
     admin, _, _ = team
+    g, g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
     r = handle_message(s, admin, "/add Fix pump @Ravi #site", admin)
-    assert "matches several groups" in r.text
+    assert "matches 2 groups" in r.text
+    assert "1. Site B Construction" in r.text and "2. Site Office" in r.text
     assert s.query(Task).count() == 0
+    r2 = handle_message(s, admin, "2", admin)          # pick Site Office
+    assert "announced in Site Office" in r2.text
+    handle_message(s, admin, "y", admin)
+    assert s.query(Task).order_by(Task.id.desc()).first().post_to_group_id == g2.id
 
 
 def test_add_group_tag_membership_enforced(s, team, grp, monkeypatch):
@@ -741,10 +749,10 @@ def test_group_greedy_does_not_eat_the_nudge_message(s, team, grp):
     assert _jj.loads(b.group_ids) == [g.id]
 
 
-def test_ambiguous_group_still_refused_after_greedy(s, team, grp):
+def test_ambiguous_group_after_greedy_asks_rather_than_guesses(s, team, grp):
     admin, _, _ = team
     r = handle_message(s, admin, "/add Fix pump @Ravi #site", admin)
-    assert "matches several groups" in r.text
+    assert "matches 2 groups" in r.text
     assert s.query(Task).count() == 0
 
 
@@ -797,6 +805,123 @@ def test_help_shows_both_spaced_name_forms(s, team):
     t = handle_message(s, admin, "/help", admin).text
     assert "@Ravi.Shankar" in t and '@"Ravi Shankar"' in t
     assert t.index("/add ") < t.index("1 done")
+
+
+# ------- v1.6.5: "which one?" picker for ambiguous @names / #groups -------
+@pytest.fixture()
+def two_ravis(s, team):
+    """Two people whose names both start with 'Ravi' - @Ravi is ambiguous."""
+    a, ravi, _ = team
+    ravi.name = "Ravi Shankar"
+    kumar = Member(name="Ravi Kumar", phone="971500000045", role="member")
+    s.add(kumar); s.commit()
+    return ravi, kumar
+
+
+def test_add_ambiguous_name_asks_instead_of_guessing(s, team, two_ravis):
+    admin, _, _ = team
+    shankar, kumar = two_ravis
+    r = handle_message(s, admin, "/add Fix the pump @Ravi tomorrow !high", admin)
+    assert "matches 2 people" in r.text
+    assert "1. Ravi Shankar" in r.text and "2. Ravi Kumar" in r.text
+    assert "0045" in r.text                       # last 4 digits to tell apart
+    assert s.query(Task).count() == 0             # nothing created yet
+    r2 = handle_message(s, admin, "2", admin)     # pick Ravi Kumar
+    assert "Ravi Kumar" in r2.text and "Y to confirm" in r2.text
+    handle_message(s, admin, "y", admin)
+    t = s.query(Task).order_by(Task.id.desc()).first()
+    assert t.assignee_id == kumar.id
+    # the rest of the command survived the round trip
+    assert t.title == "Fix the pump" and t.priority == "high"
+    assert t.due_date == date.today() + timedelta(days=1)
+
+
+def test_typo_offers_close_matches(s, team, two_ravis):
+    admin, _, _ = team
+    shankar, _ = two_ravis
+    r = handle_message(s, admin, "/add Order rebar @Rvai", admin)
+    assert "Did you mean" in r.text and "Ravi Shankar" in r.text
+    handle_message(s, admin, "1", admin)
+    handle_message(s, admin, "y", admin)
+    assert s.query(Task).order_by(Task.id.desc()).first().assignee_id == shankar.id
+
+
+def test_a_real_stranger_is_still_just_refused(s, team):
+    """Typo-rescue must not turn 'nobody' into 'here, pick someone'."""
+    admin, _, _ = team
+    r = handle_message(s, admin, "/add Fix pump @Zxqwerty", admin)
+    assert "recognise" in r.text
+    assert "Did you mean" not in r.text
+
+
+def test_pick_works_for_nudges(s, team, two_ravis):
+    admin, _, _ = team
+    _, kumar = two_ravis
+    r = handle_message(s, admin, "/nudge 730 tue @Ravi Status?", admin)
+    assert "matches 2 people" in r.text
+    handle_message(s, admin, "2", admin)
+    handle_message(s, admin, "y", admin)
+    b = s.query(Broadcast).order_by(Broadcast.id.desc()).first()
+    import json as _jj
+    assert _jj.loads(b.member_ids) == [kumar.id]
+    assert b.send_time == "07:30" and b.message == "Status?"
+
+
+def test_pick_for_block_waiting_does_not_block_until_chosen(s, team, two_ravis):
+    """The status change must NOT be applied before the question is answered -
+    otherwise the re-run would hit an already-blocked task."""
+    admin, _, _ = team
+    shankar, kumar = two_ravis
+    t = _task(s, team, assignee=shankar)
+    r = handle_message(s, shankar, f"{t.id} block waiting on @Ravi", admin)
+    assert "matches 2 people" in r.text
+    assert s.get(Task, t.id).status == "open"     # not blocked yet
+    r2 = handle_message(s, shankar, "2", admin)
+    assert r2.react
+    t2 = s.get(Task, t.id)
+    assert t2.status == "blocked" and t2.waiting_on_id == kumar.id
+
+
+def test_pick_for_rename(s, team, two_ravis):
+    admin, _, _ = team
+    _, kumar = two_ravis
+    r = handle_message(s, admin, "/rename @Ravi Ravi K Nair", admin)
+    assert "matches 2 people" in r.text
+    handle_message(s, admin, "2", admin)
+    r3 = handle_message(s, admin, "y", admin)
+    assert "Renamed Ravi Kumar to Ravi K Nair" in r3.text
+    assert s.get(Member, kumar.id).name == "Ravi K Nair"
+
+
+def test_bare_number_only_answers_the_pick(s, team, two_ravis):
+    """'2 done' must keep meaning 'task 2, done' even with a pick pending."""
+    admin, ravi, _ = team
+    shankar, _ = two_ravis
+    t = _task(s, team, assignee=shankar)
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)   # pick pending
+    r = handle_message(s, admin, f"{t.id} done", admin)      # NOT a pick answer
+    assert r.react
+    assert s.get(Task, t.id).status == "done"
+    assert s.query(Task).count() == 1            # the /add was dropped, not created
+
+
+def test_out_of_range_pick_is_refused(s, team, two_ravis):
+    admin, _, _ = team
+    handle_message(s, admin, "/add Fix pump @Ravi", admin)
+    r = handle_message(s, admin, "7", admin)
+    assert "no 7 on that list" in r.text
+    assert s.query(Task).count() == 0
+
+
+def test_group_pick(s, team, grp, monkeypatch):
+    admin, _, _ = team
+    g, g2 = grp
+    monkeypatch.setattr(C, "_creator_in_group", lambda m, cid: True)
+    r = handle_message(s, admin, "/add Fix pump @Ravi #site", admin)
+    assert "matches 2 groups" in r.text
+    handle_message(s, admin, "1", admin)
+    handle_message(s, admin, "y", admin)
+    assert s.query(Task).order_by(Task.id.desc()).first().post_to_group_id == g.id
 
 
 # ------- v1.6.5: renaming a member -------

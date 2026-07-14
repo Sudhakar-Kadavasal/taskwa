@@ -339,22 +339,22 @@ C.append(Spacer(1, 3))
 
 
 def big_cmd(cmd, desc):
-    t = Table([[Paragraph(f"<font face='Mono-Bold' size=9.6>{cmd}</font>",
-                          st("bc", alignment=TA_LEFT, spaceAfter=0, leading=12.2)),
-                Paragraph(desc, st("bd", fontSize=8.3, leading=10.6,
+    t = Table([[Paragraph(f"<font face='Mono-Bold' size=9>{cmd}</font>",
+                          st("bc", alignment=TA_LEFT, spaceAfter=0, leading=11.4)),
+                Paragraph(desc, st("bd", fontSize=7.8, leading=9.9,
                                    alignment=TA_LEFT, spaceAfter=0))]],
-              colWidths=[FW*0.40, FW*0.60])
+              colWidths=[FW*0.38, FW*0.62])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), SAND),
         ("BACKGROUND", (1, 0), (1, -1), CREAM),
         ("BOX", (0, 0), (-1, -1), 0.8, LINE),
         ("LINEBEFORE", (0, 0), (0, -1), 3, ORANGE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3.4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
     ]))
-    return [t, Spacer(1, 3)]
+    return [t, Spacer(1, 2.4)]
 
 
 def band(txt):
@@ -400,7 +400,12 @@ for cmd, desc in [
   "A name or a group with a space in it: <b>dot it, or quote it</b> — curly "
   "quotes from your phone are fine. Names and groups follow the same rule. "
   "@Ravi or #group on their own are fine when they match only one person / one "
-  "group; if two match, the bot asks instead of guessing."),
+  "group."),
+ ("<i>two Ravis?</i><br/>reply&nbsp;&nbsp;1&nbsp;&nbsp;or&nbsp;&nbsp;2",
+  "If a name matches <b>two people</b> (or you mistype one), the bot lists them "
+  "numbered — \"1. Ravi Shankar  2. Ravi Kumar\" — and you reply with just the "
+  "number. It never guesses. Your original message is then carried out as "
+  "typed. Same for a #group that matches two groups."),
  # --- status replies ---
  ("1 done", "Task 1 finished. You'll get a thumbs-up."),
  ("1 in progress", "You've started task 1."),
