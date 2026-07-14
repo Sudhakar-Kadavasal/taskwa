@@ -90,6 +90,15 @@
 - The phone number stays uneditable by design — it is the identity and the
   allowlist key. Deactivate and add new.
 
+### Flyer
+
+- The flyer's emerald footer now carries **clickable links to the Installation
+  Guide, User Manual and Command Card** on GitHub, plus the repo line itself is
+  now a live link. Done by *stamping* the approved artwork
+  (`tools/docgen/flyer-base.pdf` → `dg_flyer_links.py`), not by redrawing it:
+  a pixel diff shows the only change is the one new line in the footer. Not an
+  application change — no version bump.
+
 ### Commands
 
 - **`/help` restructured:** all `/commands` first, then the spaced-name

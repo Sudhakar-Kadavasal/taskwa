@@ -6,9 +6,10 @@ page furniture, chat bubbles, drawn-illustration helpers).
 
 ```bash
 pip install reportlab pypdf
-python tools/docgen/dg_manual.py    # docs/TaskWA-User-Manual.pdf
-python tools/docgen/dg_install.py   # docs/TaskWA-Installation-Guide.pdf
-                                    #  + docs/TaskWA-Command-Card.pdf (1 page)
+python tools/docgen/dg_manual.py      # docs/TaskWA-User-Manual.pdf
+python tools/docgen/dg_install.py     # docs/TaskWA-Installation-Guide.pdf
+                                      #  + docs/TaskWA-Command-Card.pdf (1 page)
+python tools/docgen/dg_flyer_links.py # docs/TaskWA-Flyer.pdf (stamps the base)
 ```
 
 Rules learned the hard way:
@@ -24,5 +25,9 @@ Rules learned the hard way:
 - After regenerating, visually verify: `pdftoppm -png -r 60 <pdf> page`
   and inspect the images before committing.
 
-The marketing flyer (docs/TaskWA-Flyer.pdf) is the user's final approved
-file — do NOT regenerate or overwrite it.
+The marketing flyer is the user's final approved artwork and is NOT generated
+from code. `tools/docgen/flyer-base.pdf` is the pristine copy;
+`dg_flyer_links.py` stamps the footer link line + URI annotations onto it and
+writes `docs/TaskWA-Flyer.pdf`. It always stamps the BASE, never a stamped
+file, so it is idempotent. Never redraw the flyer — to change the artwork,
+replace flyer-base.pdf.
