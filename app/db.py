@@ -45,10 +45,11 @@ DEFAULTS = {
     "max_gap_seconds": 30,
     "jitter_minutes": 6,             # +/- drift on every scheduled start time
     "purge_after_days": 30,
-    "weekly_board_enabled": False,   # weekly kanban snapshot - OFF until ready
-    "weekly_board_day": 0,           # 0=Mon .. 6=Sun
+    "weekly_board_enabled": False,   # board snapshot - OFF until ready
+    "weekly_board_days": [],         # list of 0=Mon..6=Sun; max 2; empty = no cron
     "weekly_board_time": "08:05",
-    "weekly_board_test_mode": False,  # redirect every image to admin (rehearsal)
+    "weekly_board_test_mode": False,  # redirect every image to one admin (rehearsal)
+    "weekly_board_admin_id": 0,      # 0 = auto (lowest-id active admin)
     "last_send": "",
     "last_backup": "",
     "gateway_status": "UNKNOWN",

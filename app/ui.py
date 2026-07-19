@@ -649,10 +649,13 @@ def broadcast_send_now(request: Request, bid: int):
 
 # ---------------- settings, health, export ----------------
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request):
+def settings_page(request: Request, err: str = ""):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
+        admins = (s.query(Member)
+                   .filter(Member.role == "admin", Member.active.is_(True))
+                   .order_by(Member.id).all())
         return templates.TemplateResponse(request, "settings.html", _ctx(
             request, s,
             timezone=get_setting(s, "timezone"),
@@ -665,9 +668,11 @@ def settings_page(request: Request):
             jitter_minutes=get_setting(s, "jitter_minutes"),
             purge_after_days=get_setting(s, "purge_after_days"),
             weekly_board_enabled=get_setting(s, "weekly_board_enabled"),
-            weekly_board_day=get_setting(s, "weekly_board_day"),
+            weekly_board_days=get_setting(s, "weekly_board_days"),
             weekly_board_time=get_setting(s, "weekly_board_time"),
-            weekly_board_test_mode=get_setting(s, "weekly_board_test_mode")))
+            weekly_board_test_mode=get_setting(s, "weekly_board_test_mode"),
+            weekly_board_admin_id=get_setting(s, "weekly_board_admin_id"),
+            admins=admins, err=err[:200]))
 
 
 @router.post("/settings")
@@ -678,14 +683,36 @@ def settings_save(request: Request, timezone: str = Form(...),
                   max_gap_seconds: int = Form(30),
                   jitter_minutes: int = Form(6),
                   purge_after_days: int = Form(30),
-                  weekly_board_day: int = Form(0),
+                  weekly_board_days: list[int] = Form(default=[]),
                   weekly_board_time: str = Form("08:05"),
+                  weekly_board_admin_id: int = Form(default=0),
                   dry_run: str = Form(""), personal_mode: str = Form(""),
                   weekly_board_enabled: str = Form(""),
                   weekly_board_test_mode: str = Form("")):
     if (r := _guard(request)):
         return r
+    from urllib.parse import quote
+    # Reject (don't partially save) rather than silently truncate: a bad
+    # board-schedule submission should not clobber the other settings on the
+    # same form, and the admin should see exactly why it didn't save.
+    days = sorted({d for d in weekly_board_days if 0 <= d <= 6})
+    if len(days) > 2:
+        return RedirectResponse(
+            "/settings?err=" + quote(
+                "Board snapshot can fire at most 2 days a week - untick one."),
+            status_code=303)
     with session_scope() as s:
+        if weekly_board_admin_id:
+            ok_admin = (s.query(Member)
+                         .filter(Member.id == weekly_board_admin_id,
+                                Member.role == "admin",
+                                Member.active.is_(True)).first())
+            if ok_admin is None:
+                return RedirectResponse(
+                    "/settings?err=" + quote(
+                        "Selected board-snapshot admin is not active - "
+                        "pick another."),
+                    status_code=303)
         set_setting(s, "timezone", timezone.strip())
         set_setting(s, "send_times",
                     [t.strip() for t in send_times.split(",") if t.strip()])
@@ -701,7 +728,7 @@ def settings_save(request: Request, timezone: str = Form(...),
         set_setting(s, "dry_run", dry_run == "on")
         set_setting(s, "personal_mode", personal_mode == "on")
         set_setting(s, "weekly_board_enabled", weekly_board_enabled == "on")
-        set_setting(s, "weekly_board_day", min(6, max(0, weekly_board_day)))
+        set_setting(s, "weekly_board_days", days)
         wt = weekly_board_time.strip()
         try:
             hh, mm = wt.split(":")
@@ -710,11 +737,12 @@ def settings_save(request: Request, timezone: str = Form(...),
             wt = "08:05"     # keep a valid HH:MM; bad input never breaks the cron
         set_setting(s, "weekly_board_time", wt)
         set_setting(s, "weekly_board_test_mode", weekly_board_test_mode == "on")
+        set_setting(s, "weekly_board_admin_id", weekly_board_admin_id)
     from .scheduler import (reload_board_jobs, reload_broadcast_jobs,
                             reload_digest_jobs)
     reload_digest_jobs()
     reload_broadcast_jobs()   # legacy/fallback rows follow the new timezone
-    reload_board_jobs()       # (de)register the weekly board cron on toggle
+    reload_board_jobs()       # (de)register the board-snapshot cron on toggle
     return RedirectResponse("/settings", status_code=303)
 
 

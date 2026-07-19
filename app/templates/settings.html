@@ -42,29 +42,40 @@
                style="width:auto"></div>
     </div>
 
-    <h2 style="margin-bottom:4px">Weekly board snapshot
+    <h2 style="margin-bottom:4px">Board snapshot
       <span class="badge b-open" style="vertical-align:middle">v1.7 · in development</span></h2>
-    <p class="muted" style="margin-top:0">A once-a-week kanban image to each
+    <p class="muted" style="margin-top:0">A periodic kanban image to each
       member (and group). Ships OFF. Turn on test mode first to rehearse the
-      real cron with every image redirected to you.</p>
+      real cron with every image redirected to one admin.</p>
+    {% if err %}<div class="banner bad">{{ err }}</div>{% endif %}
     <div class="grid">
-      <div><label>Enable weekly board send</label>
+      <div><label>Enable board snapshot send</label>
         <input type="checkbox" name="weekly_board_enabled"
                {% if weekly_board_enabled %}checked{% endif %} style="width:auto"></div>
-      <div><label>Test mode (send every board to you, not the team)</label>
+      <div><label>Test mode (send every board to the chosen admin, not the team)</label>
         <input type="checkbox" name="weekly_board_test_mode"
                {% if weekly_board_test_mode %}checked{% endif %} style="width:auto">
         <small>Job still fires on the real cron; each image is redirected to the
-        lowest-id admin, tagged with who it was really for. Zero risk to the team.</small></div>
-      <div><label>Day of week</label>
-        <select name="weekly_board_day">
-          {% for i, d in [(0,'Monday'),(1,'Tuesday'),(2,'Wednesday'),(3,'Thursday'),
-                          (4,'Friday'),(5,'Saturday'),(6,'Sunday')] %}
-            <option value="{{ i }}" {% if weekly_board_day==i %}selected{% endif %}>{{ d }}</option>
+        admin below, tagged with who it was really for. Zero risk to the team.</small></div>
+      <div><label>Send test-mode preview to</label>
+        <select name="weekly_board_admin_id">
+          <option value="0" {% if weekly_board_admin_id==0 %}selected{% endif %}>
+            auto (lowest-id admin)</option>
+          {% for a in admins %}
+            <option value="{{ a.id }}" {% if weekly_board_admin_id==a.id %}selected{% endif %}>
+              {{ a.name }}</option>
           {% endfor %}
         </select></div>
       <div><label>Send time (24h HH:MM)</label>
         <input name="weekly_board_time" value="{{ weekly_board_time }}"></div>
+    </div>
+    <label>Days (max 2 - none ticked means no cron is scheduled at all)</label>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 4px">
+      {% for i, d in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+        <label style="font-weight:400;display:flex;align-items:center;gap:5px">
+          <input type="checkbox" name="weekly_board_days" value="{{ i }}"
+                 {% if i in weekly_board_days %}checked{% endif %} style="width:auto"> {{ d }}</label>
+      {% endfor %}
     </div>
     <br><button>Save settings</button>
   </form>

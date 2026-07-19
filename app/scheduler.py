@@ -244,22 +244,37 @@ def reload_broadcast_jobs():
                                     if j.id.startswith(_BCAST_JOB_PREFIX)])
 
 
+def _resolve_test_admin(s):
+    """Who test-mode sends redirect to. weekly_board_admin_id=0 means "auto":
+    the lowest-id active admin (same default as the dashboard picker). A
+    non-zero id that no longer resolves to an active admin is NOT silently
+    swapped for a different one - the caller must skip the run instead."""
+    from .models import Member
+    chosen = int(get_setting(s, "weekly_board_admin_id") or 0)
+    q = s.query(Member).filter(Member.role == "admin", Member.active.is_(True))
+    if chosen:
+        return q.filter(Member.id == chosen).first()
+    return q.order_by(Member.id).first()
+
+
 def send_weekly_boards():
-    """Weekly kanban snapshot to the team.
+    """Board snapshot to the team.
 
     RECIPIENT CONTRAST - READ BEFORE "FIXING": with test mode OFF this sends
     each member's board to THAT MEMBER'S OWN chat, and each group's board to
     THAT GROUP - real team-wide delivery. This is deliberately NOT the
     admin-preview path: do not route it through commands.build_board_previews()
-    or otherwise redirect it to the admin. The preview/test-mode paths send to
-    the admin ON PURPOSE; this one does not, and that difference is the point of
+    or otherwise redirect it to an admin. The preview/test-mode paths send to
+    an admin ON PURPOSE; this one does not, and that difference is the point of
     the feature. Only weekly_board_test_mode=true redirects here.
 
-    Test mode ON: every image goes to the lowest-id active admin instead (same
-    default as the dashboard picker), captioned with who it was really for, so
-    the admin sees the exact per-recipient breakdown at zero risk to the team.
-    Scheduling is gated solely by weekly_board_enabled (see reload_board_jobs);
-    test mode changes only the recipient, never whether the job runs."""
+    Test mode ON: every image goes to the configured admin instead (see
+    _resolve_test_admin - defaults to the lowest-id active admin, or an
+    explicitly chosen one from Settings), captioned with who it was really
+    for, so the admin sees the exact per-recipient breakdown at zero risk to
+    the team. Scheduling is gated by weekly_board_enabled AND at least one day
+    being configured (see reload_board_jobs); test mode changes only the
+    recipient, never whether the job runs."""
     from .board_render import render_member_board, render_group_board
     from .commands import _board_sub, _group_open_tasks, _recent_done_for
     from .engine import open_tasks_for
@@ -272,12 +287,11 @@ def send_weekly_boards():
         test_mode = bool(get_setting(s, "weekly_board_test_mode"))
         admin_chat = None
         if test_mode:
-            admin = (s.query(Member)
-                      .filter(Member.role == "admin", Member.active.is_(True))
-                      .order_by(Member.id).first())
+            admin = _resolve_test_admin(s)
             if admin is None:
-                log.warning("weekly boards: test mode on but no active admin - "
-                            "skipping run to avoid a real team send")
+                log.warning("board snapshot: test mode on but the configured "
+                            "admin isn't active (or none exists) - skipping "
+                            "run to avoid a real team send")
                 return
             admin_chat = chat_id_for_phone(admin.phone)
         members = s.query(Member).filter(Member.active.is_(True)).all()
@@ -291,10 +305,10 @@ def send_weekly_boards():
             png = render_member_board(m.name, _board_sub(tasks), tasks, done)
             if test_mode:
                 sends.append((admin_chat, png,
-                              f"Weekly board test · would go to: {m.name}"))
+                              f"Board snapshot test · would go to: {m.name}"))
             else:
                 sends.append((chat_id_for_phone(m.phone), png,
-                              "Your weekly board"))
+                              "Your board snapshot"))
         for g in groups:
             gtasks = _group_open_tasks(s, g)
             if not gtasks:
@@ -302,42 +316,54 @@ def send_weekly_boards():
             png = render_group_board(g.name, _board_sub(gtasks), gtasks)
             if test_mode:
                 sends.append((admin_chat, png,
-                              f"Weekly board test · would go to: {g.name} (group)"))
+                              f"Board snapshot test · would go to: {g.name} (group)"))
             else:
-                sends.append((g.chat_id, png, "Weekly group board"))
+                sends.append((g.chat_id, png, "Board snapshot"))
     # send_image throttles internally (3-8 s between sends); sequential is fine.
     for chat, png, cap in sends:
         send_image(chat, png, cap)
-    log.info("weekly boards: sent %d image(s), test_mode=%s", len(sends), test_mode)
+    log.info("board snapshot: sent %d image(s), test_mode=%s", len(sends), test_mode)
 
 
 def reload_board_jobs():
-    """(Re)create the single weekly board cron. Registered ONLY when
-    weekly_board_enabled is true - disabled means no job exists at all. Test
-    mode does NOT affect scheduling (only who receives the send), so
-    enabled=true + test_mode=true still registers the job: that combination is
-    the full risk-free rehearsal of the real cron path."""
+    """(Re)create the board-snapshot cron. Registered ONLY when
+    weekly_board_enabled is true AND at least one day is configured -
+    disabled, or no days ticked, both mean no job exists at all. Days are
+    capped at 2 defensively (settings_save is the primary guard - this is
+    belt-and-suspenders in case a bad value ever reaches storage another way).
+    A single CronTrigger fires on all configured days (APScheduler accepts a
+    comma-joined day_of_week list). Test mode does NOT affect scheduling (only
+    who receives the send), so enabled=true + test_mode=true still registers
+    the job: that combination is the full risk-free rehearsal of the real
+    cron path."""
     if scheduler.get_job(_BOARD_JOB_ID):
         scheduler.remove_job(_BOARD_JOB_ID)
     with session_scope() as s:
         if not get_setting(s, "weekly_board_enabled"):
-            log.info("weekly board job: disabled, not scheduled")
+            log.info("board snapshot job: disabled, not scheduled")
             return
         tz = ZoneInfo(get_setting(s, "timezone") or "UTC")
-        day = int(get_setting(s, "weekly_board_day") or 0)
+        days = [int(d) for d in (get_setting(s, "weekly_board_days") or [])
+                if 0 <= int(d) <= 6]
         t = (get_setting(s, "weekly_board_time") or "08:05").strip()
+    days = sorted(set(days))[:2]   # defensive cap; settings_save is primary guard
+    if not days:
+        log.info("board snapshot job: no days configured, not scheduled")
+        return
+    dow = ",".join(_DOW_NAMES[d] for d in days)
     jit = jitter_seconds()
     try:
         hh, mm = t.split(":")
         scheduler.add_job(send_weekly_boards, CronTrigger(
-            day_of_week=_DOW_NAMES[day % 7], hour=int(hh), minute=int(mm),
+            day_of_week=dow, hour=int(hh), minute=int(mm),
             timezone=tz, jitter=jit or None),
             id=_BOARD_JOB_ID, replace_existing=True,
             misfire_grace_time=6 * 3600, coalesce=True)
-        log.info("weekly board job scheduled: %s %s tz=%s jitter=%ss",
-                 _DOW_NAMES[day % 7], t, tz, jit)
+        log.info("board snapshot job scheduled: %s %s tz=%s jitter=%ss",
+                 dow, t, tz, jit)
     except Exception as e:
-        log.error("bad weekly board schedule (day=%r time=%r): %s", day, t, e)
+        log.error("bad board snapshot schedule (days=%r time=%r): %s",
+                  days, t, e)
 
 
 def run_broadcast_soon(broadcast_id: int):

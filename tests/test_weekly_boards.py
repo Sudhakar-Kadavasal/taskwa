@@ -1,10 +1,13 @@
-"""Weekly board scheduler job (v1.7, step 5).
+"""Board snapshot scheduler job (v1.7, step 5 + follow-up).
 
-Two things under test: (a) scheduling is gated ONLY by weekly_board_enabled -
-test mode never affects whether the job exists; (b) the recipient split - test
-mode redirects every image to the admin, real mode delivers to each member's /
-group's own chat. That real-vs-preview recipient contrast is intentional; see
-send_weekly_boards' docstring."""
+Three things under test: (a) scheduling is gated by weekly_board_enabled AND
+at least one (max 2) day being configured - test mode never affects whether
+the job exists; (b) the recipient split - test mode redirects every image to
+an admin, real mode delivers to each member's/group's own chat (that
+real-vs-preview recipient contrast is intentional; see send_weekly_boards'
+docstring); (c) the test-mode admin is configurable (weekly_board_admin_id),
+defaulting to the lowest-id active admin, and a stale id skips rather than
+silently falling back to someone else."""
 import os
 import sys
 import tempfile
@@ -72,22 +75,53 @@ def test_disabled_registers_no_job(db):
 
 
 def test_enabled_registers_the_job(db):
-    _set(weekly_board_enabled=True, weekly_board_day=2, weekly_board_time="09:15")
+    _set(weekly_board_enabled=True, weekly_board_days=[2], weekly_board_time="09:15")
     reload_board_jobs()
     assert scheduler.scheduler.get_job(_BOARD_JOB_ID) is not None
 
 
+def test_enabled_but_no_days_registers_no_job(db):
+    """enabled=true alone isn't enough - at least one day must be ticked."""
+    _set(weekly_board_enabled=True, weekly_board_days=[], weekly_board_time="09:15")
+    reload_board_jobs()
+    assert scheduler.scheduler.get_job(_BOARD_JOB_ID) is None
+
+
+def test_two_days_registers_one_job_firing_on_both(db):
+    _set(weekly_board_enabled=True, weekly_board_days=[0, 3],
+         weekly_board_time="09:15")
+    reload_board_jobs()
+    job = scheduler.scheduler.get_job(_BOARD_JOB_ID)
+    assert job is not None
+    assert "mon" in str(job.trigger) and "thu" in str(job.trigger)
+
+
+def test_more_than_two_days_defensively_capped(db):
+    """settings_save is the primary guard against >2 days; this proves the
+    scheduler itself never blows up or schedules more than 2 even if a bad
+    value somehow reaches storage another way."""
+    import re
+    _set(weekly_board_enabled=True, weekly_board_days=[0, 1, 2, 3],
+         weekly_board_time="09:15")
+    reload_board_jobs()
+    job = scheduler.scheduler.get_job(_BOARD_JOB_ID)
+    assert job is not None
+    dow = re.search(r"day_of_week='([^']*)'", str(job.trigger)).group(1)
+    assert len(dow.split(",")) <= 2   # at most 2 day tokens, not 4
+
+
 def test_test_mode_does_not_gate_scheduling(db):
-    """enabled=true + test_mode=true must STILL register the job - test mode
-    changes only the recipient, never whether the cron fires. This is the full
-    risk-free rehearsal combination."""
-    _set(weekly_board_enabled=True, weekly_board_test_mode=True)
+    """enabled=true + test_mode=true + a configured day must STILL register
+    the job - test mode changes only the recipient, never whether the cron
+    fires. This is the full risk-free rehearsal combination."""
+    _set(weekly_board_enabled=True, weekly_board_test_mode=True,
+         weekly_board_days=[0])
     reload_board_jobs()
     assert scheduler.scheduler.get_job(_BOARD_JOB_ID) is not None
 
 
 def test_reload_removes_job_when_disabled_again(db):
-    _set(weekly_board_enabled=True)
+    _set(weekly_board_enabled=True, weekly_board_days=[0])
     reload_board_jobs()
     assert scheduler.scheduler.get_job(_BOARD_JOB_ID) is not None
     _set(weekly_board_enabled=False)
@@ -154,3 +188,37 @@ def test_test_mode_without_active_admin_skips(db, monkeypatch):
     calls = _capture(monkeypatch)
     send_weekly_boards()
     assert calls == []
+
+
+# ---------------- explicit admin_id (Settings dropdown) ----------------
+def test_test_mode_honours_explicit_admin_choice(db, monkeypatch):
+    """weekly_board_admin_id, when set, overrides the lowest-id-admin default."""
+    _team_with_tasks()
+    with session_scope() as s:
+        s.add(Member(name="Mathew", phone="971500000099", role="admin"))
+    with session_scope() as s:
+        mathew_id = s.query(Member).filter(Member.name == "Mathew").first().id
+    _set(weekly_board_enabled=True, weekly_board_test_mode=True,
+         weekly_board_admin_id=mathew_id)
+    calls = _capture(monkeypatch)
+    send_weekly_boards()
+    assert len(calls) == 3
+    # Mathew (explicitly chosen), NOT Sudhakar (lowest id)
+    assert all(chat == "971500000099@c.us" for chat, _, _ in calls)
+
+
+def test_test_mode_stale_admin_id_skips_not_falls_back(db, monkeypatch):
+    """A configured admin_id that's no longer an active admin must skip the
+    run, never silently fall back to a different admin (same rule as the
+    dashboard preview picker)."""
+    _team_with_tasks()
+    with session_scope() as s:
+        s.add(Member(name="Retired", phone="971500000098", role="admin",
+                     active=False))
+    with session_scope() as s:
+        retired_id = s.query(Member).filter(Member.name == "Retired").first().id
+    _set(weekly_board_enabled=True, weekly_board_test_mode=True,
+         weekly_board_admin_id=retired_id)
+    calls = _capture(monkeypatch)
+    send_weekly_boards()
+    assert calls == []   # not redirected to Sudhakar (lowest id) either
