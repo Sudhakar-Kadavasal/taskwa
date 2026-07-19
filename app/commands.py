@@ -31,6 +31,7 @@ HELP_TEXT = (
     "   #group posts + announces it in that group\n"
     "/mytasks - your open tasks\n"
     "/myadd - open tasks you created for others\n"
+    "/board - your task board as an image\n"
     "/list - open tasks you can see\n"
     "/help - this message\n"
     "\n"
@@ -64,6 +65,8 @@ ADMIN_HELP = (
     "/adduser <number> <name> - register a member\n"
     "/rename <@who> <new name> - change the name the team sees\n"
     "/members - list registered members\n"
+    "/board preview [@Name #group ...] - rehearse boards to yourself\n"
+    "   (no names = every active member/group with tasks; all sent to you)\n"
     "e.g. /nudge 07:30 tue @Ravi.Shankar What is the status\n"
     "     /nudge 730 tue @\"Ravi Shankar\" What is the status\n"
     "Time: 07:30  7:30  730  0730  7.30  7:30am  730pm  7am all work.\n"
@@ -118,15 +121,19 @@ class Reply:
     unmatched=True marks ordinary conversation - the webhook suppresses these
     replies in groups and in personal-number mode.
     extra_sends: additional (chat_id, text) messages to other recipients
-    (e.g. notifying an assignee) - each still vetted by the send allowlist."""
+    (e.g. notifying an assignee) - each still vetted by the send allowlist.
+    image_sends: (chat_id, png_bytes, caption) images to dispatch - each goes
+    through waha.send_image, so the same allowlist/cap/throttle applies."""
     def __init__(self, text: str | None = None, react: bool = False,
                  alert_admin: str | None = None, unmatched: bool = False,
-                 extra_sends: list | None = None, ambiguity=None):
+                 extra_sends: list | None = None, ambiguity=None,
+                 image_sends: list | None = None):
         self.text = text
         self.react = react
         self.alert_admin = alert_admin
         self.unmatched = unmatched
         self.extra_sends = extra_sends or []
+        self.image_sends = image_sends or []
         # set when a tag inside a status reply ('3 block waiting on @Ravi')
         # matched several people - the dispatcher turns it into the question
         self.ambiguity = ambiguity
@@ -1102,6 +1109,104 @@ def _verb_reply(s, sender: Member, body: str, r: Reply) -> Reply:
     return r
 
 
+def _board_sub(open_tasks: list) -> str:
+    """The little header line under a board: open + blocked counts."""
+    blocked = sum(1 for t in open_tasks if t.status == "blocked")
+    return f"{len(open_tasks)} open · {blocked} blocked"
+
+
+def _recent_done_for(s, member: Member) -> list:
+    """Tasks this member completed in the last 7 days, newest first."""
+    week = datetime.utcnow() - timedelta(days=7)
+    return (s.query(Task)
+             .filter(Task.assignee_id == member.id, Task.status == "done",
+                     Task.completed_at.isnot(None), Task.completed_at >= week)
+             .order_by(Task.completed_at.desc()).all())
+
+
+def _group_open_tasks(s, group) -> list:
+    """Open/in-progress/blocked tasks posted to a group, in board order."""
+    rows = (s.query(Task)
+             .filter(Task.post_to_group_id == group.id,
+                     Task.status.in_(("open", "in_progress", "blocked")))
+             .all())
+    return sort_tasks(rows)
+
+
+def _handle_my_board(s, sender: Member) -> Reply:
+    """/board (alias /myboard) - render the sender's own board and send it to
+    their own DM. No text reply, so typing /board in a group posts nothing to
+    the group - the image lands privately."""
+    from .board_render import render_member_board
+    tasks = open_tasks_for(s, sender)
+    done = _recent_done_for(s, sender)
+    png = render_member_board(sender.name, _board_sub(tasks), tasks, done)
+    chat = f"{sender.phone}@c.us"
+    return Reply(text="", image_sends=[(chat, png, "Your board")])
+
+
+def _handle_board_preview(s, sender: Member, arg: str) -> Reply:
+    """Admin-only rehearsal: render the chosen (or all active) member/group
+    boards and send EVERY image to the admin's own DM - never to the person
+    the board is about. A private dry-run of what a team-wide push would look
+    like, with zero risk to anyone else. Uses the shared @name/#group
+    resolvers so it matches /add and /nudge exactly."""
+    from .board_render import render_member_board, render_group_board
+    admin_chat = f"{sender.phone}@c.us"
+    members, groups, unresolved = [], [], []
+
+    arg = arg.strip()
+    if not arg:
+        members = s.query(Member).filter(Member.active.is_(True)).all()
+        groups = s.query(Group).filter(Group.active.is_(True)).all()
+        skip_empty = True
+    else:
+        words = arg.split()
+        i = 0
+        while i < len(words):
+            w = words[i]
+            if w.startswith("@"):
+                m, i = _resolve_member_run(s, words, i)
+                (members if m else unresolved).append(m or words[i - 1])
+            elif w.startswith("#"):
+                g, nxt, _err = _resolve_group_run(s, words, i)
+                (groups if g else unresolved).append(g or words[i])
+                i = nxt
+            else:
+                unresolved.append(w)
+                i += 1
+        skip_empty = False   # a name asked for explicitly renders even if empty
+
+    unresolved = [u for u in unresolved if isinstance(u, str)]
+    if unresolved:
+        return Reply(text="Couldn't resolve: " + ", ".join(unresolved)
+                          + ".\nUse @Name / #group (dot or quote spaces). "
+                            "/members lists everyone.")
+
+    sends = []
+    for m in members:
+        tasks = open_tasks_for(s, m)
+        done = _recent_done_for(s, m)
+        if skip_empty and not tasks and not done:
+            continue
+        png = render_member_board(m.name, _board_sub(tasks), tasks, done)
+        sends.append((admin_chat, png, f"Preview · {m.name}"))
+    for g in groups:
+        gtasks = _group_open_tasks(s, g)
+        if skip_empty and not gtasks:
+            continue
+        png = render_group_board(g.name, _board_sub(gtasks), gtasks)
+        sends.append((admin_chat, png, f"Preview · {g.name} (group)"))
+
+    if not sends:
+        return Reply(text="Nothing to preview - no active member or group has "
+                          "any tasks right now.")
+    n = len(sends)
+    return Reply(text=f"Previewing {n} board{'s' if n != 1 else ''} to you "
+                      "only (nobody else gets these).",
+                 image_sends=sends)
+
+
 def _apply_pick(s, sender: Member, draft: dict, chosen_id: int,
                 admin, is_group, quoted, group_id) -> Reply:
     """The user picked a number. Rewrite the ORIGINAL command with that person
@@ -1295,6 +1400,18 @@ def handle_message(s, sender: Member, body: str, admin: Member | None,
                           + "\n\n/rename <@who> <new name> - change the name "
                             "the team sees\n/adduser <number> <name> - add "
                             "someone")
+
+    # ---- /board  (and admin-only /board preview) ----
+    mb = re.match(r"^/(board|myboard)\b\s*(.*)$", body, re.IGNORECASE | re.DOTALL)
+    if mb:
+        rest = mb.group(2).strip()
+        if rest.lower().startswith("preview"):
+            if is_group:
+                return Reply(unmatched=True)   # never rehearsed in groups
+            if sender.role != "admin":
+                return Reply(text="That's an admin command.")
+            return _handle_board_preview(s, sender, rest[len("preview"):].strip())
+        return _handle_my_board(s, sender)
 
     # ---- /myadd: open tasks I created ----
     if low.startswith("/myadd"):

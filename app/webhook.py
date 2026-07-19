@@ -22,7 +22,8 @@ from .db import get_setting, session_scope
 from .digest import alert_admins
 from .engine import member_by_phone
 from .models import Group, Member, ProcessedMessage
-from .waha import lid_to_phone, list_groups, me_chat_id, send_reaction, send_text
+from .waha import (lid_to_phone, list_groups, me_chat_id, send_image,
+                   send_reaction, send_text)
 
 log = logging.getLogger("webhook")
 router = APIRouter()
@@ -152,6 +153,8 @@ async def webhook(request: Request, background: BackgroundTasks):
         background.add_task(send_text, chat, reply.text)
     for cid, txt in reply.extra_sends:   # e.g. assignee/waiting-on notice
         background.add_task(send_text, cid, txt)
+    for cid, png, cap in reply.image_sends:   # e.g. /board rendered image
+        background.add_task(send_image, cid, png, cap)
     if reply.alert_admin:
         # an admin already getting a specific notice is not alerted twice
         background.add_task(alert_admins, reply.alert_admin,
