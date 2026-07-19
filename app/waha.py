@@ -3,6 +3,7 @@
 All outbound traffic passes through send_text(), which honours dry-run mode,
 logs every message, and enforces the hourly cap.
 """
+import base64
 import logging
 import random
 import time
@@ -308,6 +309,53 @@ def send_text(chat_id: str, text: str) -> bool:
                          status="sent" if ok else "failed", detail=detail))
     if not ok:
         log.error("send failed -> %s: %s", chat_id, detail)
+    return ok
+
+
+def send_image(chat_id: str, png: bytes, caption: str = "") -> bool:
+    """Send a PNG image (or log it in dry-run). Returns True on success.
+
+    Mirrors send_text guard-for-guard - canonical_chat_id -> allowlist ->
+    dry-run -> hourly cap -> throttle - so an image can NEVER reach anyone a
+    text message could not, and every send is still logged and rate-limited.
+    Endpoint/payload verified against WAHA 2026.7.1 (WEBJS/CORE): POST
+    /api/sendImage with file.data as base64 (the engine atob()s it)."""
+    chat_id = canonical_chat_id(chat_id)
+    with session_scope() as s:
+        if not _allowed_recipient(s, chat_id):
+            s.add(MessageLog(chat_id=chat_id, text="[image]", status="blocked",
+                             detail="recipient not a registered member/group - send refused"))
+            log.warning("BLOCKED image send to unregistered recipient %s", chat_id)
+            return False
+        if get_setting(s, "dry_run"):
+            s.add(MessageLog(chat_id=chat_id, text=f"[image] {caption}".strip(),
+                             status="dryrun"))
+            log.info("[DRY-RUN] image -> %s: %s", chat_id, caption[:80])
+            return True
+        cap = int(get_setting(s, "hourly_cap") or 60)
+        if _hourly_count(s) >= cap:
+            s.add(MessageLog(chat_id=chat_id, text="[image]", status="failed",
+                             detail="hourly cap reached"))
+            log.warning("hourly cap reached; image to %s not sent", chat_id)
+            return False
+    _throttle()     # never two messages within a few seconds of each other
+    b64 = base64.b64encode(png).decode()
+    try:
+        with _client() as c:
+            r = c.post("/api/sendImage", json={
+                "session": env.waha_session, "chatId": chat_id,
+                "file": {"mimetype": "image/png", "filename": "board.png",
+                         "data": b64},
+                "caption": caption})
+            ok = r.status_code < 300
+            detail = "" if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        ok, detail = False, str(e)
+    with session_scope() as s:
+        s.add(MessageLog(chat_id=chat_id, text=f"[image] {caption}".strip(),
+                         status="sent" if ok else "failed", detail=detail))
+    if not ok:
+        log.error("image send failed -> %s: %s", chat_id, detail)
     return ok
 
 

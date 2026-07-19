@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Board{% endblock %}
+{% block content %}
+<div class="banner warn">TaskWA Kanban — v1.7, in development. Not yet released;
+  layout and features may still change.</div>
+
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1 style="margin-bottom:2px">Board</h1>
+    <p class="muted" style="margin-top:0">Nag list — not the full workload.
+      Only tasks TaskWA is tracking.</p>
+  </div>
+  <form method="get" action="/board">
+    <select name="assignee" onchange="this.form.submit()">
+      <option value="0">All members</option>
+      {% for m in members %}
+        <option value="{{ m.id }}" {% if f_assignee==m.id %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<div class="board-grid">
+  {% for key, label in [('open','To do'), ('in_progress','In progress'),
+                        ('blocked','Blocked'), ('done','Done')] %}
+  <div class="board-col">
+    <div class="board-col-head board-col-{{ key }}">
+      <span>{{ label|upper }}</span><span>{{ cols[key]|length }}</span>
+    </div>
+    <div class="board-col-body">
+      {% for t in cols[key] %}
+      <div class="board-card{% if key=='done' %} board-card-done{% endif %}">
+        <div class="board-card-top">
+          <span class="board-serial">{{ t.id }}</span>
+          <span class="board-title">{{ t.title }}</span>
+        </div>
+        <div class="muted board-meta">
+          {{ t.assignee.name }}
+          {% if key != 'done' %} · <span class="p-{{ t.priority }}">{{ t.priority }}</span>
+            {% if t.due_date %} ·
+              <span {% if t.due_date < today and t.is_open %}class="overdue"{% endif %}>
+                due {{ t.due_date.strftime('%d %b') }}</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        {% if key=='blocked' and t.blocker_reason %}
+          <div class="board-blocker">Blocked {{ t.blocked_days }}d: {{ t.blocker_reason }}</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="muted board-empty">Nothing here.</p>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Preview selected boards</h2>
+  <p class="muted">Sends the board image only to your own WhatsApp — nothing
+    goes to the team. Use this to check how it looks before turning on the
+    weekly send.</p>
+  <form method="post" action="/board/preview">
+    <div class="board-preview-picker">
+      {% for m in members %}
+        <label class="board-pick"><input type="checkbox" name="member_ids" value="{{ m.id }}"> {{ m.name }}</label>
+      {% endfor %}
+      {% for g in groups %}
+        <label class="board-pick"><input type="checkbox" name="group_ids" value="{{ g.id }}"> #{{ g.name }}</label>
+      {% endfor %}
+    </div>
+    <button type="submit">Send preview to me</button>
+  </form>
+</div>
+{% endblock %}
