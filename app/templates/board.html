@@ -3,6 +3,8 @@
 {% block content %}
 <div class="banner warn">TaskWA Kanban — v1.7, in development. Not yet released;
   layout and features may still change.</div>
+{% if msg %}<div class="banner ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="banner bad">{{ err }}</div>{% endif %}
 
 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
   <div>
@@ -69,6 +71,19 @@
         <label class="board-pick"><input type="checkbox" name="group_ids" value="{{ g.id }}"> #{{ g.name }}</label>
       {% endfor %}
     </div>
+    {% if admins|length > 1 %}
+    <div style="margin-bottom:10px">
+      <label class="muted" style="display:block;margin-bottom:3px">Send preview to</label>
+      <select name="admin_id">
+        {% for a in admins %}
+          <option value="{{ a.id }}" {% if loop.first %}selected{% endif %}>{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% elif admins|length == 1 %}
+      <input type="hidden" name="admin_id" value="{{ admins[0].id }}">
+      <p class="muted" style="margin:0 0 10px">Sends to {{ admins[0].name }} only.</p>
+    {% endif %}
     <button type="submit">Send preview to me</button>
   </form>
 </div>

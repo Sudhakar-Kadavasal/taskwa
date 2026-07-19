@@ -1,9 +1,9 @@
 """Admin dashboard: login, setup wizard, tasks, members, groups, settings, health."""
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import (HTMLResponse, RedirectResponse, Response,
                                StreamingResponse)
 from fastapi.templating import Jinja2Templates
@@ -219,6 +219,98 @@ def tasks_page(request: Request, status: str = "open", assignee: int = 0,
             request, s, tasks=tasks, members=members, groups=groups,
             f_status=status, f_assignee=assignee, today=date.today(),
             priorities=PRIORITIES, err=err[:200]))
+
+
+# ---------------- kanban board (read-only) + preview-to-self ----------------
+@router.get("/board", response_class=HTMLResponse)
+def board_page(request: Request, assignee: int = 0, msg: str = "",
+               err: str = ""):
+    """Read-only kanban snapshot. Status changes still happen on the Tasks
+    page; this view never mutates. The Done column is bounded to the last 7
+    days so the page stays finite (and matches the WhatsApp board's 'done last
+    week')."""
+    if (r := _guard(request)):
+        return r
+    with session_scope() as s:
+        week = datetime.utcnow() - timedelta(days=7)
+        openq = s.query(Task).filter(
+            Task.status.in_(("open", "in_progress", "blocked")))
+        doneq = s.query(Task).filter(
+            Task.status == "done", Task.completed_at.isnot(None),
+            Task.completed_at >= week)
+        if assignee:
+            openq = openq.filter(Task.assignee_id == assignee)
+            doneq = doneq.filter(Task.assignee_id == assignee)
+        opens = sort_tasks(openq.all())
+        cols = {k: [t for t in opens if t.status == k]
+                for k in ("open", "in_progress", "blocked")}
+        cols["done"] = doneq.order_by(Task.completed_at.desc()).all()
+        members = s.query(Member).filter(Member.active.is_(True)).all()
+        groups = s.query(Group).filter(Group.active.is_(True)).all()
+        admins = (s.query(Member)
+                   .filter(Member.role == "admin", Member.active.is_(True))
+                   .order_by(Member.id).all())
+        return templates.TemplateResponse(request, "board.html", _ctx(
+            request, s, cols=cols, members=members, groups=groups,
+            admins=admins, f_assignee=assignee, today=date.today(),
+            msg=msg[:200], err=err[:200]))
+
+
+@router.post("/board/preview")
+def board_preview(request: Request, background: BackgroundTasks,
+                  member_ids: list[int] = Form(default=[]),
+                  group_ids: list[int] = Form(default=[]),
+                  admin_id: int = Form(default=0)):
+    """Render the selected boards and send each image to ONE chosen admin's
+    WhatsApp only - never to the person the board is about. The dashboard has
+    one shared login with no per-admin session identity, so the picker asks
+    explicitly (defaulting to the lowest-id admin) rather than guessing who's
+    at the keyboard. A stale/invalid admin_id is refused, never silently
+    redirected to a different admin. Same builder as the WhatsApp '/board
+    preview' command, so behaviour can't diverge. Dispatch is backgrounded
+    (send_image throttles internally) so the redirect returns at once instead
+    of blocking for 3-8 s per image."""
+    if (r := _guard(request)):
+        return r
+    from urllib.parse import quote
+    from .commands import build_board_previews
+    if not member_ids and not group_ids:
+        return RedirectResponse(
+            "/board?err=" + quote("Pick at least one board to preview."),
+            status_code=303)
+    with session_scope() as s:
+        admins_q = (s.query(Member)
+                     .filter(Member.role == "admin", Member.active.is_(True))
+                     .order_by(Member.id))
+        if admin_id:
+            admin = admins_q.filter(Member.id == admin_id).first()
+            if admin is None:
+                return RedirectResponse(
+                    "/board?err=" + quote(
+                        "That admin is no longer active - pick another."),
+                    status_code=303)
+        else:
+            admin = admins_q.first()
+        if admin is None:
+            return RedirectResponse(
+                "/board?err=" + quote("No active admin to send the preview to."),
+                status_code=303)
+        admin_chat = waha.chat_id_for_phone(admin.phone)
+        members = (s.query(Member).filter(Member.id.in_(member_ids)).all()
+                   if member_ids else [])
+        groups = (s.query(Group).filter(Group.id.in_(group_ids)).all()
+                  if group_ids else [])
+        # skip_empty=False: the admin ticked these boxes on purpose - render
+        # even an empty board so the picker never silently drops a selection.
+        sends = build_board_previews(s, members, groups, admin_chat,
+                                     skip_empty=False)
+    for chat, png, cap in sends:
+        background.add_task(waha.send_image, chat, png, cap)
+    n = len(sends)
+    return RedirectResponse(
+        "/board?msg=" + quote(f"Sending {n} board{'s' if n != 1 else ''} to "
+                              "your WhatsApp (nobody else gets these)."),
+        status_code=303)
 
 
 @router.post("/tasks/create")

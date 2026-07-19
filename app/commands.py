@@ -1145,13 +1145,40 @@ def _handle_my_board(s, sender: Member) -> Reply:
     return Reply(text="", image_sends=[(chat, png, "Your board")])
 
 
-def _handle_board_preview(s, sender: Member, arg: str) -> Reply:
-    """Admin-only rehearsal: render the chosen (or all active) member/group
-    boards and send EVERY image to the admin's own DM - never to the person
-    the board is about. A private dry-run of what a team-wide push would look
-    like, with zero risk to anyone else. Uses the shared @name/#group
-    resolvers so it matches /add and /nudge exactly."""
+def build_board_previews(s, members: list, groups: list, admin_chat: str,
+                         skip_empty: bool) -> list:
+    """Render member/group boards and address EVERY image to admin_chat -
+    never to the person the board is about. The single source of truth for a
+    board rehearsal, shared by the WhatsApp '/board preview' command and the
+    dashboard POST /board/preview so the two can never drift apart.
+
+    skip_empty drops boards with no tasks (used when previewing 'all active');
+    an explicitly chosen member/group is rendered regardless. Returns a list of
+    (chat_id, png_bytes, caption) tuples ready for waha.send_image."""
     from .board_render import render_member_board, render_group_board
+    sends = []
+    for m in members:
+        tasks = open_tasks_for(s, m)
+        done = _recent_done_for(s, m)
+        if skip_empty and not tasks and not done:
+            continue
+        png = render_member_board(m.name, _board_sub(tasks), tasks, done)
+        sends.append((admin_chat, png, f"Preview · {m.name}"))
+    for g in groups:
+        gtasks = _group_open_tasks(s, g)
+        if skip_empty and not gtasks:
+            continue
+        png = render_group_board(g.name, _board_sub(gtasks), gtasks)
+        sends.append((admin_chat, png, f"Preview · {g.name} (group)"))
+    return sends
+
+
+def _handle_board_preview(s, sender: Member, arg: str) -> Reply:
+    """Admin-only rehearsal over WhatsApp: render the chosen (or all active)
+    member/group boards and send EVERY image to the admin's own DM. A private
+    dry-run of what a team-wide push would look like, with zero risk to anyone
+    else. Uses the shared @name/#group resolvers so it matches /add and /nudge
+    exactly, and the shared builder so it matches the dashboard button."""
     admin_chat = f"{sender.phone}@c.us"
     members, groups, unresolved = [], [], []
 
@@ -1183,21 +1210,7 @@ def _handle_board_preview(s, sender: Member, arg: str) -> Reply:
                           + ".\nUse @Name / #group (dot or quote spaces). "
                             "/members lists everyone.")
 
-    sends = []
-    for m in members:
-        tasks = open_tasks_for(s, m)
-        done = _recent_done_for(s, m)
-        if skip_empty and not tasks and not done:
-            continue
-        png = render_member_board(m.name, _board_sub(tasks), tasks, done)
-        sends.append((admin_chat, png, f"Preview · {m.name}"))
-    for g in groups:
-        gtasks = _group_open_tasks(s, g)
-        if skip_empty and not gtasks:
-            continue
-        png = render_group_board(g.name, _board_sub(gtasks), gtasks)
-        sends.append((admin_chat, png, f"Preview · {g.name} (group)"))
-
+    sends = build_board_previews(s, members, groups, admin_chat, skip_empty)
     if not sends:
         return Reply(text="Nothing to preview - no active member or group has "
                           "any tasks right now.")
