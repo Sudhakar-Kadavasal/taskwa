@@ -663,7 +663,11 @@ def settings_page(request: Request):
             min_gap_seconds=get_setting(s, "min_gap_seconds"),
             max_gap_seconds=get_setting(s, "max_gap_seconds"),
             jitter_minutes=get_setting(s, "jitter_minutes"),
-            purge_after_days=get_setting(s, "purge_after_days")))
+            purge_after_days=get_setting(s, "purge_after_days"),
+            weekly_board_enabled=get_setting(s, "weekly_board_enabled"),
+            weekly_board_day=get_setting(s, "weekly_board_day"),
+            weekly_board_time=get_setting(s, "weekly_board_time"),
+            weekly_board_test_mode=get_setting(s, "weekly_board_test_mode")))
 
 
 @router.post("/settings")
@@ -674,7 +678,11 @@ def settings_save(request: Request, timezone: str = Form(...),
                   max_gap_seconds: int = Form(30),
                   jitter_minutes: int = Form(6),
                   purge_after_days: int = Form(30),
-                  dry_run: str = Form(""), personal_mode: str = Form("")):
+                  weekly_board_day: int = Form(0),
+                  weekly_board_time: str = Form("08:05"),
+                  dry_run: str = Form(""), personal_mode: str = Form(""),
+                  weekly_board_enabled: str = Form(""),
+                  weekly_board_test_mode: str = Form("")):
     if (r := _guard(request)):
         return r
     with session_scope() as s:
@@ -692,9 +700,21 @@ def settings_save(request: Request, timezone: str = Form(...),
         set_setting(s, "purge_after_days", max(1, purge_after_days))
         set_setting(s, "dry_run", dry_run == "on")
         set_setting(s, "personal_mode", personal_mode == "on")
-    from .scheduler import reload_broadcast_jobs, reload_digest_jobs
+        set_setting(s, "weekly_board_enabled", weekly_board_enabled == "on")
+        set_setting(s, "weekly_board_day", min(6, max(0, weekly_board_day)))
+        wt = weekly_board_time.strip()
+        try:
+            hh, mm = wt.split(":")
+            int(hh); int(mm)
+        except Exception:
+            wt = "08:05"     # keep a valid HH:MM; bad input never breaks the cron
+        set_setting(s, "weekly_board_time", wt)
+        set_setting(s, "weekly_board_test_mode", weekly_board_test_mode == "on")
+    from .scheduler import (reload_board_jobs, reload_broadcast_jobs,
+                            reload_digest_jobs)
     reload_digest_jobs()
     reload_broadcast_jobs()   # legacy/fallback rows follow the new timezone
+    reload_board_jobs()       # (de)register the weekly board cron on toggle
     return RedirectResponse("/settings", status_code=303)
 
 

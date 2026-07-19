@@ -41,6 +41,31 @@
         <input type="checkbox" name="personal_mode" {% if personal_mode %}checked{% endif %}
                style="width:auto"></div>
     </div>
+
+    <h2 style="margin-bottom:4px">Weekly board snapshot
+      <span class="badge b-open" style="vertical-align:middle">v1.7 · in development</span></h2>
+    <p class="muted" style="margin-top:0">A once-a-week kanban image to each
+      member (and group). Ships OFF. Turn on test mode first to rehearse the
+      real cron with every image redirected to you.</p>
+    <div class="grid">
+      <div><label>Enable weekly board send</label>
+        <input type="checkbox" name="weekly_board_enabled"
+               {% if weekly_board_enabled %}checked{% endif %} style="width:auto"></div>
+      <div><label>Test mode (send every board to you, not the team)</label>
+        <input type="checkbox" name="weekly_board_test_mode"
+               {% if weekly_board_test_mode %}checked{% endif %} style="width:auto">
+        <small>Job still fires on the real cron; each image is redirected to the
+        lowest-id admin, tagged with who it was really for. Zero risk to the team.</small></div>
+      <div><label>Day of week</label>
+        <select name="weekly_board_day">
+          {% for i, d in [(0,'Monday'),(1,'Tuesday'),(2,'Wednesday'),(3,'Thursday'),
+                          (4,'Friday'),(5,'Saturday'),(6,'Sunday')] %}
+            <option value="{{ i }}" {% if weekly_board_day==i %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select></div>
+      <div><label>Send time (24h HH:MM)</label>
+        <input name="weekly_board_time" value="{{ weekly_board_time }}"></div>
+    </div>
     <br><button>Save settings</button>
   </form>
   <p class="muted"><b>Personal number mode:</b> the bot stays silent on
