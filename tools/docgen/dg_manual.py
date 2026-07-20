@@ -19,13 +19,13 @@ def cover(cv):
     cv.setStrokeColor(INK); cv.setLineWidth(1.2)
     cv.line(ML, PAGE_H-10.3*cm, ML+7*cm, PAGE_H-10.3*cm)
     cv.setFillColor(MUTED); cv.setFont("Helvetica", 9)
-    cv.drawString(ML, PAGE_H-11.0*cm, "Version 1.6  ·  July 2026")
+    cv.drawString(ML, PAGE_H-11.0*cm, "Version 1.7  ·  July 2026")
     cv.setFillColor(MUTED); cv.setFont("Helvetica", 7.8)
     cv.drawString(ML, 1.9*cm, "Part I — For team members      "
                               "Part II — For the administrator")
 
 
-doc = make_doc(OUT, "TaskWA User Manual · v1.6", "User Manual", cover)
+doc = make_doc(OUT, "TaskWA User Manual · v1.7", "User Manual", cover)
 E = []
 start_body(E)
 
@@ -71,6 +71,13 @@ E.append(P("<b>Even easier — swipe to reply.</b> Swipe (long-press → Reply) 
 E.append(P("<b>See your list any time:</b> send <font face='Mono-Bold'>/mytasks</font>. "
            "<b>Confused?</b> Send <font face='Mono-Bold'>/help</font>."))
 
+E.append(P("See it as a picture — /board", "h2"))
+E.append(P("Sometimes a list isn't enough. Send <font face='Mono-Bold'>/board</font> "
+           "(or <font face='Mono-Bold'>/myboard</font>) and TaskWA replies with an "
+           "image — your own tasks laid out as a board: Blocked, In progress, "
+           "To do, and what you finished in the last 7 days. It's yours alone; "
+           "nobody else's tasks appear on it, and nobody else can pull yours "
+           "except an admin naming you on purpose (next part)."))
 E.append(P("Creating a task", "h2"))
 E.append(P("Send /add with a title. Mention someone to assign it to them; add "
            "<font face='Mono'>!high</font> or <font face='Mono'>!low</font> for priority; "
@@ -250,6 +257,35 @@ E.append(P("Add the bot's WhatsApp number to the group, then click <b>Detect my 
            "private. Tasks flagged 'post to group' (or created via /add inside the group) "
            "appear in that group's daily digest instead of the assignee's personal one."))
 
+E.append(P("The Board page — kanban view (new in v1.7)", "h2"))
+E.append(P("Dashboard → Board shows every open task as four columns — To do, "
+           "In progress, Blocked, Done (last 7 days only, so it doesn't grow "
+           "forever) — with a per-assignee filter. It's read-only: a "
+           "quick shape-of-the-work view, not a second place to edit tasks. "
+           "While v1.7 is new, the page carries an amber 'in development' "
+           "banner as a heads-up that layout may still change."))
+E.append(P("<b>Preview before anyone sees anything.</b> The same page has a "
+           "<b>Preview selected boards</b> panel — tick any members and/or "
+           "groups, pick which admin should receive it (if there's more than "
+           "one admin), click send: the rendered board images go to that "
+           "admin's own WhatsApp chat only. Nothing goes to the team. Use "
+           "this to see exactly what a member's board image looks like "
+           "before turning anything on for real. The same thing is available "
+           "from WhatsApp as <font face='Mono-Bold'>/board preview @Name"
+           "</font> (admin-only, DM-only; no name previews everyone)."))
+E.append(P("<b>Board snapshot — an optional picture on a schedule.</b> "
+           "Settings can turn on a recurring send of each person's board "
+           "image, on up to two chosen days a week, at a set time. It ships "
+           "<b>off by default</b> — nothing goes out until you turn it on. "
+           "There is also a <b>test mode</b>: with test mode on, the real "
+           "schedule fires for real (proving the day/time actually works) "
+           "but every image is redirected to one admin instead of the team, "
+           "captioned with who it would really have gone to. The intended "
+           "order: turn it on with test mode on and a near-term time, confirm "
+           "the images look right, turn test mode off for exactly one real "
+           "send to the team as a final check, then set the schedule you "
+           "actually want and leave test mode off."))
+
 E.append(P("Nudger — your own plain messages, on a schedule", "h2"))
 E.append(P("The Nudger sends <b>exactly the text you type</b> to chosen members and "
            "groups — no task numbers, no headers, no reply footer: polite nudging "
@@ -319,6 +355,12 @@ E.append(table(["Command", "What it does"],
       "refuses. Same thing inline on the dashboard's Members page."],
      [Paragraph("<font face='Mono-Bold'>/members</font>", S["tcell"]),
       "List everyone registered, with roles and inactive flags."],
+     [Paragraph("<font face='Mono-Bold'>/board preview @Ravi.Shankar "
+                "#Site.B</font>", S["tcell"]),
+      "Render the named member(s)/group(s) board(s) and send them to YOUR "
+      "own WhatsApp only — never the team. Leave off the names to preview "
+      "everyone at once. Same feature as the dashboard's Preview panel, "
+      "for when you're on your phone."],
      [Paragraph("<font face='Mono-Bold'>/help</font>", S["tcell"]),
       "Role-aware: members see member commands; admins (in DM) also get "
       "this admin section."]],

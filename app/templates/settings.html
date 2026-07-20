@@ -40,6 +40,13 @@
       <div><label>Personal number mode (bot shares the owner's own WhatsApp)</label>
         <input type="checkbox" name="personal_mode" {% if personal_mode %}checked{% endif %}
                style="width:auto"></div>
+      <div><label>Auto-recover the WhatsApp gateway</label>
+        <input type="checkbox" name="auto_restart_enabled"
+               {% if auto_restart_enabled %}checked{% endif %} style="width:auto">
+        <small>If the session goes FAILED/STOPPED, restart it automatically on a
+        widening backoff (no QR - the pairing is kept), then email you to
+        re-pair if the restarts don't recover it. A genuine logout
+        (SCAN_QR_CODE) is never auto-restarted.</small></div>
     </div>
 
     <h2 style="margin-bottom:4px">Board snapshot

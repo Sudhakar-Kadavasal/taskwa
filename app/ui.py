@@ -667,6 +667,7 @@ def settings_page(request: Request, err: str = ""):
             max_gap_seconds=get_setting(s, "max_gap_seconds"),
             jitter_minutes=get_setting(s, "jitter_minutes"),
             purge_after_days=get_setting(s, "purge_after_days"),
+            auto_restart_enabled=get_setting(s, "auto_restart_enabled"),
             weekly_board_enabled=get_setting(s, "weekly_board_enabled"),
             weekly_board_days=get_setting(s, "weekly_board_days"),
             weekly_board_time=get_setting(s, "weekly_board_time"),
@@ -687,6 +688,7 @@ def settings_save(request: Request, timezone: str = Form(...),
                   weekly_board_time: str = Form("08:05"),
                   weekly_board_admin_id: int = Form(default=0),
                   dry_run: str = Form(""), personal_mode: str = Form(""),
+                  auto_restart_enabled: str = Form(""),
                   weekly_board_enabled: str = Form(""),
                   weekly_board_test_mode: str = Form("")):
     if (r := _guard(request)):
@@ -727,6 +729,7 @@ def settings_save(request: Request, timezone: str = Form(...),
         set_setting(s, "purge_after_days", max(1, purge_after_days))
         set_setting(s, "dry_run", dry_run == "on")
         set_setting(s, "personal_mode", personal_mode == "on")
+        set_setting(s, "auto_restart_enabled", auto_restart_enabled == "on")
         set_setting(s, "weekly_board_enabled", weekly_board_enabled == "on")
         set_setting(s, "weekly_board_days", days)
         wt = weekly_board_time.strip()
@@ -751,6 +754,7 @@ def health_page(request: Request):
     if (r := _guard(request)):
         return r
     status = waha.session_status()
+    from .scheduler import AUTO_RESTART_MAX
     with session_scope() as s:
         log_rows = (s.query(MessageLog)
                      .order_by(MessageLog.created_at.desc()).limit(30).all())
@@ -759,7 +763,18 @@ def health_page(request: Request):
             last_send=get_setting(s, "last_send"),
             last_backup=get_setting(s, "last_backup"),
             tzname=get_setting(s, "timezone") or "UTC",
+            gateway_status_at=get_setting(s, "gateway_status_at"),
+            auto_restart_enabled=get_setting(s, "auto_restart_enabled"),
+            restart_attempts=get_setting(s, "gateway_restart_attempts"),
+            restart_max=AUTO_RESTART_MAX,
             log_rows=log_rows))
+
+
+def _reset_restart_budget(s):
+    """A manual gateway action clears the auto-restarter's counter so it starts
+    fresh from the human's known-good baseline."""
+    set_setting(s, "gateway_restart_attempts", 0)
+    set_setting(s, "gateway_restart_at", "")
 
 
 @router.post("/health/start-session")
@@ -767,6 +782,30 @@ def health_start(request: Request):
     if (r := _guard(request)):
         return r
     waha.start_session()
+    return RedirectResponse("/health", status_code=303)
+
+
+@router.post("/health/restart-session")
+def health_restart(request: Request):
+    """Class-A recovery: restart the engine, keep the WhatsApp pairing (no QR)."""
+    if (r := _guard(request)):
+        return r
+    waha.restart_session()
+    with session_scope() as s:
+        _reset_restart_budget(s)
+    return RedirectResponse("/health", status_code=303)
+
+
+@router.post("/health/repair")
+def health_repair(request: Request):
+    """Class-B recovery: log the device out and start fresh so a new QR appears.
+    Use only when WhatsApp actually de-authorised the number."""
+    if (r := _guard(request)):
+        return r
+    waha.logout_session()
+    waha.start_session()
+    with session_scope() as s:
+        _reset_restart_budget(s)
     return RedirectResponse("/health", status_code=303)
 
 

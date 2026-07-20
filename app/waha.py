@@ -71,6 +71,62 @@ def start_session():
         return r.status_code < 300
 
 
+def stop_session() -> bool:
+    """Stop the session WITHOUT logging out - the WhatsApp pairing in
+    data/waha/ is preserved, so a following start comes straight back up with
+    no QR."""
+    try:
+        with _client() as c:
+            r = c.post(f"/api/sessions/{env.waha_session}/stop")
+            return r.status_code < 300
+    except Exception as e:
+        log.warning("stop_session failed: %s", e)
+        return False
+
+
+def restart_session() -> bool:
+    """Recover a FAILED / STOPPED session WITHOUT re-pairing.
+
+    WAHA's FAILED status usually means the engine (headless Chromium for the
+    WEBJS engine) crashed or the connection dropped - the stored auth is still
+    valid, so a restart brings it back to WORKING with no QR scan. This is the
+    Class-A recovery the auto-restarter uses. It deliberately does NOT log out;
+    that would force a fresh QR (see logout_session). Uses WAHA's /restart,
+    falling back to stop+start on older builds."""
+    try:
+        with _client() as c:
+            r = c.post(f"/api/sessions/{env.waha_session}/restart")
+            if r.status_code < 300:
+                return True
+            log.warning("restart_session /restart -> HTTP %s %s",
+                        r.status_code, r.text[:200])
+    except Exception as e:
+        log.warning("restart_session /restart failed: %s", e)
+    # older WAHA (no /restart): stop then start, auth still preserved
+    stop_session()
+    return start_session()
+
+
+def logout_session() -> bool:
+    """Log the WhatsApp device OUT - the NEXT start needs a fresh QR scan.
+
+    Class-B recovery only: use when WhatsApp itself de-authorised the device
+    (status stuck FAILED after restarts, or SCAN_QR_CODE). NEVER call this from
+    the auto-restarter - repeatedly re-pairing a personal number is a ban
+    signal."""
+    try:
+        with _client() as c:
+            r = c.post(f"/api/sessions/{env.waha_session}/logout")
+            if r.status_code < 300:
+                return True
+            # older WAHA exposed logout without the /sessions prefix
+            r = c.post(f"/api/{env.waha_session}/logout")
+            return r.status_code < 300
+    except Exception as e:
+        log.warning("logout_session failed: %s", e)
+        return False
+
+
 def qr_png() -> bytes | None:
     try:
         with _client() as c:

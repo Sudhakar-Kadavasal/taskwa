@@ -54,6 +54,9 @@ DEFAULTS = {
     "last_backup": "",
     "gateway_status": "UNKNOWN",
     "gateway_status_at": "",
+    "auto_restart_enabled": True,     # auto-recover a FAILED/STOPPED session
+    "gateway_restart_attempts": 0,    # consecutive auto-restarts since WORKING
+    "gateway_restart_at": "",         # ISO time of the last auto-restart
 }
 
 

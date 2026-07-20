@@ -20,14 +20,14 @@ def cover(cv):
                   "manager in about thirty minutes.")
     cv.setFillColor(MUTED); cv.setFont("Helvetica", 9)
     cv.drawString(ML+0.4*cm, PAGE_H-10.2*cm,
-                  "macOS (Apple Silicon & Intel) · Windows · Linux    ·    Version 1.6")
+                  "macOS (Apple Silicon & Intel) · Windows · Linux    ·    Version 1.7")
     cv.setFillColor(MUTED); cv.setFont("Helvetica", 7.8)
     cv.drawString(ML+0.4*cm, 1.9*cm,
                   "Illustrations are drawn representations of the real screens; "
                   "exact appearance varies slightly by version.")
 
 
-doc = make_doc(OUT, "TaskWA Installation Guide · v1.6", "Installation Guide", cover)
+doc = make_doc(OUT, "TaskWA Installation Guide · v1.7", "Installation Guide", cover)
 E = []
 start_body(E)
 
@@ -225,6 +225,10 @@ for t in [
  "the messages land on phones.",
  "<b>Prove the loop.</b> From your phone: /mytasks → create a test task with /add → reply "
  "1 done → watch for the thumbs-up and the dashboard updating.",
+ "<b>See the new v1.7 board.</b> Send <b>/board</b> from your phone for a picture "
+ "of your own tasks, or open Dashboard → Board for the kanban view and the "
+ "Preview panel (sends board images to you only, never the team — see the "
+ "User Manual, Part II).",
 ]:
     E.append(P("•  " + t, "bullet"))
 
@@ -383,6 +387,8 @@ for cmd, desc in [
   "stays on the dashboard. <b>/rename</b> changes the name the team sees (in "
   "group announcements and digests) — two people can never share a name. "
   "<b>/members</b> lists everyone with their roles."),
+ ("/board preview @Ravi.Shankar #Site.B", "<b>v1.7.</b> Sends board image(s) "
+  "to YOUR chat only — never the team."),
 ]:
     C += big_cmd(cmd, desc)
 
@@ -392,6 +398,8 @@ for cmd, desc in [
   "priority; #group also posts + announces it in that group. Reply Y to confirm "
   "— Ravi is then asked to accept it."),
  ("/mytasks", "Your open tasks, any time."),
+ ("/board  <i>(or /myboard)</i>", "<b>v1.7.</b> Your tasks as a picture — "
+  "4 status columns. Yours alone."),
  ("/list", "Every open task you're allowed to see."),
  ("/myadd", "Open tasks you created for others — with status and blocks."),
  ("/help", "The full command list (admins DM'ing the bot also get the admin set)."),
