@@ -1,24 +1,18 @@
-"""Gateway auto-recovery (v1.7.1).
+"""Gateway health check is OBSERVE-ONLY (v1.7.2).
 
-Two layers under test:
+The auto-restarter was removed by design: restarting/re-pairing a personal
+WhatsApp number repeatedly is itself a ban signal, so recovery is a MANUAL
+button on the Health page, never automatic. These tests lock that in:
 
-(a) plan_gateway_action() - the PURE decision (no DB, no sleeping): when to
-    auto-restart a FAILED/STOPPED session, when to hold on the backoff, and
-    when to stop and escalate to a human. Restarting is NEVER the answer for a
-    genuine logout (SCAN_QR_CODE / PASSKEY) or a dead container (UNREACHABLE) -
-    a restart can't fix those and looping it only adds ban risk on a personal
-    number.
-
-(b) check_gateway_health() - the wiring: reads the PREVIOUS status before
-    session_status() refreshes the cache (the bug this release fixes: the old
-    code read it after, so the was-WORKING -> now-FAILED transition was never
-    detectable), calls restart_session on the right ticks, respects the cap,
-    and clears the budget the moment the session is WORKING again.
+- check_gateway_health() NEVER restarts the session, whatever the status.
+- It still refreshes the cached status and, on recovery to WORKING, warms the
+  LID->phone map (the one useful side effect, unrelated to restarting).
+- The prev-status bug stays fixed: prev is read before session_status()
+  overwrites the cache, so a WORKING->FAILED transition is detectable.
 """
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
 os.environ["BACKUP_DIR"] = tempfile.mkdtemp()
@@ -28,55 +22,9 @@ import pytest
 from app import scheduler, waha
 from app.db import engine, session_scope, get_setting, set_setting
 from app.models import Base
-from app.scheduler import (plan_gateway_action, check_gateway_health,
-                           AUTO_RESTART_MAX, AUTO_RESTART_BACKOFF_MIN)
+from app.scheduler import check_gateway_health
 
 
-# ---------------- pure decision matrix ----------------
-def test_working_is_a_noop():
-    assert plan_gateway_action("WORKING", 0, None, True) == "noop"
-    assert plan_gateway_action("WORKING", 3, 999, True) == "noop"
-
-
-def test_first_failure_restarts_immediately():
-    assert plan_gateway_action("FAILED", 0, None, True) == "restart"
-    assert plan_gateway_action("STOPPED", 0, None, True) == "restart"
-    assert plan_gateway_action("NOT_STARTED", 0, None, True) == "restart"
-
-
-def test_backoff_holds_until_the_window_elapses():
-    # attempt 1 must wait AUTO_RESTART_BACKOFF_MIN[1] minutes
-    need = AUTO_RESTART_BACKOFF_MIN[1]
-    assert plan_gateway_action("FAILED", 1, need - 0.1, True) == "wait"
-    assert plan_gateway_action("FAILED", 1, need, True) == "restart"
-    assert plan_gateway_action("FAILED", 1, need + 100, True) == "restart"
-    # no timestamp on record (never restarted yet this streak) -> allowed
-    assert plan_gateway_action("FAILED", 1, None, True) == "restart"
-
-
-def test_widening_backoff_is_monotonic():
-    assert AUTO_RESTART_BACKOFF_MIN == sorted(AUTO_RESTART_BACKOFF_MIN)
-
-
-def test_cap_reached_escalates():
-    assert plan_gateway_action("FAILED", AUTO_RESTART_MAX, 999, True) == "escalate"
-    assert plan_gateway_action("FAILED", AUTO_RESTART_MAX + 5, 999, True) == "escalate"
-
-
-def test_disabled_never_restarts():
-    assert plan_gateway_action("FAILED", 0, None, False) == "escalate"
-
-
-@pytest.mark.parametrize("status", ["SCAN_QR_CODE", "PASSKEY_REQUIRED",
-                                    "PASSKEY_CONFIRMATION_REQUIRED",
-                                    "UNREACHABLE", "UNKNOWN"])
-def test_non_restartable_statuses_never_restart(status):
-    # regardless of attempts/backoff/enabled, these are escalate-only
-    assert plan_gateway_action(status, 0, None, True) == "escalate"
-    assert plan_gateway_action(status, 2, 999, True) == "escalate"
-
-
-# ---------------- wiring / state machine ----------------
 @pytest.fixture()
 def db():
     Base.metadata.drop_all(engine)
@@ -91,9 +39,14 @@ def _set(**kw):
             set_setting(s, k, v)
 
 
+def _get(key):
+    with session_scope() as s:
+        return get_setting(s, key)
+
+
 def _fake_status(value):
-    """Stand-in for waha.session_status(): returns `value` AND writes the
-    cache, exactly like the real one - so `prev` on the next tick is correct."""
+    """Stand-in for waha.session_status(): returns `value` AND writes the cache,
+    exactly like the real one - so `prev` on the next tick is correct."""
     def _f():
         with session_scope() as s:
             set_setting(s, "gateway_status", value)
@@ -102,92 +55,55 @@ def _fake_status(value):
     return _f
 
 
-def _restart_counter(monkeypatch):
-    calls = {"n": 0}
-    monkeypatch.setattr(waha, "restart_session",
-                        lambda: calls.__setitem__("n", calls["n"] + 1) or True)
-    return calls
+def _guard_no_restart(monkeypatch):
+    """Any call to a session-mutating WAHA action fails the test loudly."""
+    def _boom(*a, **k):
+        raise AssertionError("health check must NOT touch the session")
+    monkeypatch.setattr(waha, "restart_session", _boom)
+    monkeypatch.setattr(waha, "stop_session", _boom)
+    monkeypatch.setattr(waha, "logout_session", _boom)
+    monkeypatch.setattr(waha, "start_session", _boom)
 
 
-def _get(key):
-    with session_scope() as s:
-        return get_setting(s, key)
+@pytest.mark.parametrize("status", ["FAILED", "STOPPED", "NOT_STARTED",
+                                    "SCAN_QR_CODE", "UNREACHABLE", "STARTING"])
+def test_health_check_never_restarts(db, monkeypatch, status):
+    _set(gateway_status="WORKING")
+    _guard_no_restart(monkeypatch)
+    monkeypatch.setattr(scheduler, "session_status", _fake_status(status))
+    check_gateway_health()                      # must not raise
+    assert _get("gateway_status") == status      # cache refreshed
 
 
-def test_first_failed_tick_restarts_and_counts(db, monkeypatch):
-    _set(gateway_status="WORKING", auto_restart_enabled=True,
-         gateway_restart_attempts=0)
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("FAILED"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 1
-    assert _get("gateway_restart_attempts") == 1
-    assert _get("gateway_restart_at")            # a timestamp was stamped
-
-
-def test_second_tick_inside_backoff_holds(db, monkeypatch):
-    # one restart already made, stamped just now -> next tick must WAIT
-    _set(gateway_status="FAILED", auto_restart_enabled=True,
-         gateway_restart_attempts=1,
-         gateway_restart_at=datetime.utcnow().isoformat(timespec="seconds"))
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("FAILED"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 0                        # held, no restart
-    assert _get("gateway_restart_attempts") == 1  # unchanged
-
-
-def test_tick_after_backoff_restarts_again(db, monkeypatch):
-    old = (datetime.utcnow() - timedelta(hours=1)).isoformat(timespec="seconds")
-    _set(gateway_status="FAILED", auto_restart_enabled=True,
-         gateway_restart_attempts=1, gateway_restart_at=old)
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("FAILED"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 1
-    assert _get("gateway_restart_attempts") == 2
-
-
-def test_cap_stops_restarting(db, monkeypatch):
-    old = (datetime.utcnow() - timedelta(hours=1)).isoformat(timespec="seconds")
-    _set(gateway_status="FAILED", auto_restart_enabled=True,
-         gateway_restart_attempts=AUTO_RESTART_MAX, gateway_restart_at=old)
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("FAILED"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 0                        # gave up, escalates instead
-    assert _get("gateway_restart_attempts") == AUTO_RESTART_MAX
-
-
-def test_disabled_setting_blocks_restart(db, monkeypatch):
-    _set(gateway_status="FAILED", auto_restart_enabled=False,
-         gateway_restart_attempts=0)
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("FAILED"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 0
-
-
-def test_scan_qr_is_never_auto_restarted(db, monkeypatch):
-    _set(gateway_status="WORKING", auto_restart_enabled=True,
-         gateway_restart_attempts=0)
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("SCAN_QR_CODE"))
-    calls = _restart_counter(monkeypatch)
-    check_gateway_health()
-    assert calls["n"] == 0
-    assert _get("gateway_restart_attempts") == 0
-
-
-def test_recovery_clears_budget_and_warms_lids(db, monkeypatch):
-    _set(gateway_status="FAILED", auto_restart_enabled=True,
-         gateway_restart_attempts=3,
-         gateway_restart_at=datetime.utcnow().isoformat(timespec="seconds"))
+def test_working_is_a_noop_and_refreshes_cache(db, monkeypatch):
+    _set(gateway_status="FAILED")
+    _guard_no_restart(monkeypatch)
+    monkeypatch.setattr(scheduler, "session_status", _fake_status("WORKING"))
+    # list_groups runs the LID warmup on recovery - stub it so no network
     warm = {"n": 0}
     monkeypatch.setattr(waha, "list_groups",
                         lambda: warm.__setitem__("n", warm["n"] + 1) or [])
-    monkeypatch.setattr(scheduler, "session_status", _fake_status("WORKING"))
-    _restart_counter(monkeypatch)
     check_gateway_health()
-    assert _get("gateway_restart_attempts") == 0   # budget cleared
-    assert _get("gateway_restart_at") == ""
-    assert warm["n"] == 1                           # lid map warmed on recovery
+    assert _get("gateway_status") == "WORKING"
+    assert warm["n"] == 1        # warmed once, because prev != WORKING
+
+
+def test_no_warmup_when_already_working(db, monkeypatch):
+    _set(gateway_status="WORKING")
+    _guard_no_restart(monkeypatch)
+    monkeypatch.setattr(scheduler, "session_status", _fake_status("WORKING"))
+    warm = {"n": 0}
+    monkeypatch.setattr(waha, "list_groups",
+                        lambda: warm.__setitem__("n", warm["n"] + 1) or [])
+    check_gateway_health()
+    assert warm["n"] == 0        # steady WORKING -> no repeated warmup
+
+
+def test_auto_restart_machinery_is_gone(db):
+    """Guard against a future accidental reintroduction of the auto-restarter."""
+    assert not hasattr(scheduler, "plan_gateway_action")
+    assert not hasattr(scheduler, "AUTO_RESTART_MAX")
+    # the settings that fed it are gone from defaults too
+    from app.db import DEFAULTS
+    assert "auto_restart_enabled" not in DEFAULTS
+    assert "gateway_restart_attempts" not in DEFAULTS

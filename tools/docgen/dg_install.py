@@ -273,9 +273,14 @@ E.append(table(["Symptom", "Fix"],
       "Launch it, wait for the whale, open a NEW terminal window."],
      ["no matching manifest for linux/arm64", "Apple Silicon / Raspberry Pi: add "
       "WAHA_TAG=arm to .env, then docker compose up -d"],
-     ["QR never appears / session FAILED", "Wait 60 s → Start/restart session → refresh. "
-      "Persisting: docker compose up -d --force-recreate waha (session store survives; "
-      "worst case re-scan the QR)."],
+     ["QR never appears on first start", "Wait 60 s (the gateway boots a full browser), then "
+      "Start session, refresh. Check: docker compose logs waha --tail 50."],
+     ["Session goes FAILED or STOPPED", "Health page → Restart gateway session — restarts the "
+      "session, pairing kept, no QR. Recovery is manual (a click), never automatic. Still "
+      "failing: docker compose restart waha."],
+     ["A QR appears after a plain restart", "Not a bug — WhatsApp logged the number out. Health "
+      "page → Re-pair (new QR), scan. Recurring every few days? Keep the phone online and don't "
+      "open the bot's number in WhatsApp Web/Desktop elsewhere."],
      ["Banner: session UNREACHABLE right after start", "Normal for the first minute while "
       "the gateway boots. Refresh the Health page."],
      ["Replies do nothing", "Is the sender registered with the exact number they message "
@@ -289,10 +294,14 @@ E.append(P("<b>The restart cookbook</b> — from the install folder; none of the
            "lose data (database, backups and the WhatsApp pairing live in "
            "<font face='Mono'>data/</font> and survive):"))
 E.append(codebox([
- "docker compose restart waha        # gateway stuck / QR problems",
+ "# First try the Health page 'Restart gateway session' button (restarts",
+ "# the WhatsApp session, no QR). These are the heavier hammers if that",
+ "# doesn't recover it:",
+ "docker compose restart waha        # gateway still stuck after the button",
  "docker compose restart app         # dashboard misbehaving",
  "docker compose down && docker compose up -d    # full clean restart",
  "docker compose logs app --since 30m            # what actually happened",
+ "docker stats waha --no-stream                  # RAM: is Chromium being OOM-killed?",
  "",
  "# Docker itself wedged: quit Docker Desktop (whale menu), reopen,",
  "# wait for the steady whale, then:  docker compose up -d",

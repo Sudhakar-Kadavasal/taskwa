@@ -60,88 +60,24 @@ def reload_digest_jobs():
                                  if j.id.startswith(_DIGEST_JOB_PREFIX)])
 
 
-# ---------------- health & gateway auto-recovery ----------------
+# ---------------- health (observe only) ----------------
+# By design there is NO automatic recovery. The health check only OBSERVES the
+# gateway and (optionally) emails when it drops from WORKING. Restarting a
+# WhatsApp session is a MANUAL action from the Health page - repeatedly
+# restarting or re-pairing a personal number is itself a ban signal, so a human
+# decides when to do it. (waha.restart_session/logout_session still exist and
+# are wired to the Health-page buttons; nothing here calls them.)
 _last_alerted_status = {"value": None}
-
-# A FAILED/STOPPED session whose WhatsApp auth is still valid recovers with a
-# plain restart (no QR). We try that on a widening backoff, then give up and
-# ask a human - because relentlessly restarting/re-pairing a personal number
-# is itself a ban signal. Index = attempts already made; value = minutes we
-# must have waited since the last restart before trying again. attempt 0 fires
-# immediately; after AUTO_RESTART_MAX tries we stop and escalate.
-AUTO_RESTART_BACKOFF_MIN = [0, 5, 15, 30]
-AUTO_RESTART_MAX = len(AUTO_RESTART_BACKOFF_MIN)
-
-# Statuses a plain restart can fix (auth preserved). Everything else either
-# needs a human (SCAN_QR_CODE / PASSKEY_* = WhatsApp de-authorised the device)
-# or is out of our hands (UNREACHABLE = the WAHA container itself is down; the
-# docker restart policy owns that, not us).
-_RESTARTABLE = {"FAILED", "STOPPED", "NOT_STARTED"}
-_NEEDS_REPAIR = {"SCAN_QR_CODE", "PASSKEY_REQUIRED",
-                 "PASSKEY_CONFIRMATION_REQUIRED"}
-
-
-def plan_gateway_action(status: str, attempts: int, mins_since_last,
-                        enabled: bool) -> str:
-    """Pure decision for the health state machine (no side effects, testable).
-
-    Returns one of:
-      'noop'     - WORKING; nothing to do.
-      'restart'  - issue an auto-restart now (caller then increments attempts).
-      'wait'     - restartable, but the backoff window hasn't elapsed; hold.
-      'escalate' - stop trying and alert a human (auto-restart disabled,
-                   budget exhausted, a QR re-pair is needed, or the container
-                   is unreachable).
-
-    Never returns 'restart' for a status outside _RESTARTABLE - a QR re-scan
-    or a dead container is not something restarting can fix, and looping it
-    would only add ban risk."""
-    if status == "WORKING":
-        return "noop"
-    if status in _RESTARTABLE:
-        if not enabled or attempts >= AUTO_RESTART_MAX:
-            return "escalate"
-        if attempts <= 0:
-            return "restart"
-        need = AUTO_RESTART_BACKOFF_MIN[attempts]
-        if mins_since_last is None or mins_since_last >= need:
-            return "restart"
-        return "wait"
-    return "escalate"
-
-
-def _minutes_since(iso: str):
-    if not iso:
-        return None
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError:
-        return None
-    return (datetime.utcnow() - dt).total_seconds() / 60.0
-
-
-def _alert_once(status: str, subject: str, body: str):
-    """Email a human at most once per distinct status, so a session that sits
-    FAILED for hours doesn't email every 5 minutes."""
-    if _last_alerted_status["value"] == status:
-        return
-    _last_alerted_status["value"] = status
-    _email_alert(subject, body)
 
 
 def check_gateway_health():
     # Read the PREVIOUS status BEFORE session_status() refreshes the cache -
     # session_status() writes gateway_status itself, so reading it afterwards
-    # would just hand us back the new value and the transition (was-WORKING ->
-    # now-FAILED) would never be detectable.
+    # would just hand back the new value and the was-WORKING -> now-FAILED
+    # transition would never be detectable.
     with session_scope() as s:
         prev = get_setting(s, "gateway_status")
-        enabled = bool(get_setting(s, "auto_restart_enabled"))
-        attempts = int(get_setting(s, "gateway_restart_attempts") or 0)
-        last_at = get_setting(s, "gateway_restart_at") or ""
     status = session_status()   # refreshes cached gateway_status / _at
-    action = plan_gateway_action(status, attempts, _minutes_since(last_at),
-                                 enabled)
 
     if env.healthchecks_url and status == "WORKING":
         try:
@@ -149,12 +85,19 @@ def check_gateway_health():
         except Exception:
             pass
 
+    # Email once per distinct non-WORKING status, and only on the drop FROM
+    # WORKING, so a session sitting FAILED for hours doesn't email every 5 min.
+    if status != "WORKING" and prev == "WORKING" \
+            and _last_alerted_status["value"] != status:
+        _last_alerted_status["value"] = status
+        _email_alert(f"WhatsApp gateway session is {status}",
+                     "The task-manager gateway session is no longer WORKING.\n"
+                     "Open the dashboard Health page and click 'Restart gateway "
+                     "session'. If a QR appears, the number was logged out - "
+                     "re-pair it.")
+
     if status == "WORKING":
         _last_alerted_status["value"] = None
-        if attempts:
-            with session_scope() as s:      # recovered - clear the budget
-                set_setting(s, "gateway_restart_attempts", 0)
-                set_setting(s, "gateway_restart_at", "")
         if prev != "WORKING":
             log.info("gateway recovered to WORKING (was %s)", prev)
             # populate WAHA's lid->phone map so group replies resolve
@@ -163,46 +106,6 @@ def check_gateway_health():
                 list_groups()
             except Exception as e:
                 log.warning("lid warmup failed: %s", e)
-        return
-
-    if action == "restart":
-        from .waha import restart_session
-        n = attempts + 1
-        log.warning("gateway %s - auto-restart attempt %d/%d",
-                    status, n, AUTO_RESTART_MAX)
-        try:
-            restart_session()
-        except Exception as e:
-            log.error("auto-restart call failed: %s", e)
-        with session_scope() as s:
-            set_setting(s, "gateway_restart_attempts", n)
-            set_setting(s, "gateway_restart_at",
-                        datetime.utcnow().isoformat(timespec="seconds"))
-        if prev == "WORKING":   # first drop - tell the human it's being handled
-            _alert_once(status, f"WhatsApp gateway session is {status}",
-                        f"The gateway went {status}; auto-restart attempt "
-                        f"{n}/{AUTO_RESTART_MAX} has been issued. You'll get a "
-                        "re-pair alert only if the restarts don't recover it.")
-        return
-
-    if action == "wait":
-        return   # backoff window not elapsed; hold without spamming
-
-    # action == "escalate"
-    if status in _NEEDS_REPAIR:
-        _alert_once(status, "WhatsApp gateway needs re-pairing",
-                    "WhatsApp logged the device out - a restart can't fix this.\n"
-                    "Open the dashboard Health page and use 'Re-pair (new QR)', "
-                    "then scan with the number's phone.")
-    elif status == "UNREACHABLE":
-        _alert_once(status, "WhatsApp gateway UNREACHABLE",
-                    "The WAHA container isn't answering. Docker should restart "
-                    "it (restart: unless-stopped); if this persists, check "
-                    "`docker ps` / `docker logs waha`.")
-    else:
-        _alert_once(status, f"WhatsApp gateway still {status} after auto-restart",
-                    f"Auto-restart gave up after {AUTO_RESTART_MAX} attempts. A "
-                    "manual re-pair (QR) is likely needed - open the Health page.")
 
 
 def _email_alert(subject: str, body: str):

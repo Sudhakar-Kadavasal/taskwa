@@ -384,18 +384,41 @@ E.append(table(["Setting", "Meaning"],
 E.append(P("The Health page — your first stop when anything seems wrong", "h2"))
 E.append(table(["Status", "What to do"],
     [["WORKING", "All good. Check 'last digest' and 'last backup' times occasionally."],
-     ["SCAN_QR_CODE", "The WhatsApp pairing dropped. Click Start session if needed, scan "
-      "the QR with the bot number's phone (WhatsApp → Linked devices), refresh."],
+     ["SCAN_QR_CODE", "WhatsApp logged the number out — only a scan fixes it. Click "
+      "Re-pair (new QR), scan with the bot number's phone (WhatsApp → Linked devices), "
+      "refresh."],
      ["STARTING", "Be patient — 30–60 seconds on Apple Silicon."],
-     ["FAILED / STOPPED", "Click Start / restart session. If it fails repeatedly, restart "
-      "the gateway container (see Installation Guide, Troubleshooting)."],
+     ["FAILED / STOPPED", "The engine crashed or stopped, but the pairing is still good. "
+      "Click Restart gateway session — it restarts the session with no QR. If it keeps "
+      "failing, restart the container (see Installation Guide, Troubleshooting)."],
      ["UNREACHABLE", "The gateway container isn't running — usually right after a reboot; "
-      "wait a minute. Persisting: docker compose up -d from the install folder."]],
+      "Docker brings it back on its own within a minute. Persisting: docker compose up -d "
+      "from the install folder."]],
     [3.0*cm, FW-3.0*cm]))
 E.append(P("The message log at the bottom shows every outbound message with its status — "
            "including <b>dryrun</b> (not sent, dry-run on), <b>failed</b> (gateway error, "
            "shown), and <b>blocked</b> (recipient not registered — the allowlist refused it, "
            "which is the system protecting you)."))
+
+E.append(P("When the session fails — restart vs re-pair", "h2"))
+E.append(P("A failed session is one of two things, and the two Health-page buttons match "
+           "them. <b>Most failures are just a crashed engine</b> — the WhatsApp pairing "
+           "saved on your disk is still valid, so a plain restart brings it back with no QR. "
+           "Press <b>Restart gateway session</b>; it restarts the session with the pairing "
+           "intact and fixes most FAILED/STOPPED cases and stuck sends. Recovery is "
+           "deliberately manual — a click, never automatic — because repeatedly restarting a "
+           "personal WhatsApp number is itself a ban signal. <b>The other kind is a real "
+           "logout</b> — WhatsApp dropped the linked device (the phone was off for days, or "
+           "the bot's number was opened in WhatsApp Web/Desktop somewhere else). No restart "
+           "can fix that; it needs a fresh scan, so use <b>Re-pair (new QR)</b> and scan. "
+           "<b>The quick tell:</b> press Restart gateway session and if a QR still appears, "
+           "it was a real logout — scan it and you're back. Your tasks, history and backups "
+           "are never touched either way."))
+E.append(callout("If you find yourself re-scanning every few days, the session isn't "
+                 "crashing — it's being logged out, and the usual causes are the phone going "
+                 "offline, the bot's number being open in WhatsApp Web/Desktop on another "
+                 "device, or the machine running low on memory. Keep the phone online and the "
+                 "number off other WhatsApp Web sessions."))
 
 E.append(P("Troubleshooting — the restart cookbook", "h2"))
 E.append(P("All commands run in Terminal, from the folder TaskWA is installed in "
@@ -406,10 +429,13 @@ E.append(P("All commands run in Terminal, from the folder TaskWA is installed in
            "restart below."))
 E.append(table(["Situation", "Do this"],
     [["WhatsApp gateway stuck (FAILED / stuck QR / no messages)",
-      Paragraph("<font face='Mono'>docker compose restart waha</font> — wait a "
+      Paragraph("On the Health page click <b>Restart gateway session</b> first — it "
+                "restarts the session with no QR and fixes most cases. Still stuck: "
+                "<font face='Mono'>docker compose restart waha</font> — wait a "
                 "minute, check Health. Stubborn: <font face='Mono'>docker compose "
-                "up -d --force-recreate waha</font> (pairing survives; worst "
-                "case re-scan the QR).", S["tcell"])],
+                "up -d --force-recreate waha</font> (pairing survives; a QR "
+                "afterwards just means it was a real logout — re-scan it).",
+                S["tcell"])],
      ["App misbehaving / dashboard not loading",
       Paragraph("<font face='Mono'>docker compose restart app</font>", S["tcell"])],
      ["Restart everything cleanly",

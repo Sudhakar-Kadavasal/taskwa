@@ -11,20 +11,15 @@
   <p class="muted">Last digest run: {{ last_send | localtime }} ·
      Last backup: {{ last_backup | localtime }} ·
      All times in {{ tzname }}</p>
-  <p class="muted">Auto-recovery:
-    {% if auto_restart_enabled %}on{% else %}<b>off</b>{% endif %} ·
-    restart attempts since last WORKING: {{ restart_attempts }}/{{ restart_max }}
-    {% if restart_attempts and restart_attempts >= restart_max %}
-      <b>— auto-restart gave up; a re-pair is likely needed.</b>
-    {% endif %}
-    (toggle on the Settings page)</p>
 
   {% if status != 'WORKING' %}
-    <p class="muted">A restart recovers a crashed engine <b>without</b> a new QR
-       (the pairing survives). Re-pair only when WhatsApp actually logged the
-       number out.</p>
+    <p class="muted">Click <b>Restart gateway session</b> first — it restarts the
+       WhatsApp session <b>without</b> a new QR (the pairing survives), which
+       fixes most FAILED/STOPPED cases and stuck sends. Re-pair only when
+       WhatsApp actually logged the number out (a restart returns a QR instead
+       of recovering).</p>
     <form method="post" action="/health/restart-session" class="inline-form">
-      <button>Restart session (no re-pair)</button>
+      <button>Restart gateway session</button>
     </form>
     <form method="post" action="/health/repair" class="inline-form"
           style="margin-left:8px">
@@ -35,7 +30,7 @@
     <img src="/qr.png" alt="No QR available" style="max-width:280px">
   {% else %}
     <form method="post" action="/health/restart-session" class="inline-form">
-      <button class="ghost">Restart session</button>
+      <button class="ghost">Restart gateway session</button>
     </form>
   {% endif %}
   <form method="post" action="/health/send-digests-now" class="inline-form"
