@@ -118,6 +118,19 @@ E.append(callout("The last line must print <b>secrets OK</b>. If it doesn't (or 
                  "result into each secret, and on Apple Silicon / Raspberry Pi uncomment "
                  "<font face='Mono'>WAHA_TAG=arm</font> — without it Docker reports "
                  "'no matching manifest for linux/arm64'."))
+E.append(Spacer(1, 4))
+E.append(P("<b>Optional — choose your WhatsApp engine.</b> The default (WEBJS) is the "
+           "right choice for almost everyone and needs no changes. If you already know you "
+           "want a lighter engine (NOWEB or GOWS), <font face='Mono'>.env.example</font> "
+           "has a fully commented picker — one block per engine and CPU architecture, each "
+           "with a short why/why-not note. Uncomment exactly one block; leave the rest "
+           "commented. Pick this now if you're going to — switching later means rebuilding "
+           "the gateway container and scanning a fresh QR (see the Troubleshooting section)."))
+E.append(table(["WAHA_ENGINE", "WAHA_TAG (amd64)", "WAHA_TAG (arm64)"],
+    [["WEBJS (default)", "(leave blank)", "arm"],
+     ["NOWEB", "noweb", "noweb-arm"],
+     ["GOWS", "gows", "gows-arm"]],
+    [4.6*cm, FW/2-2.3*cm, FW/2-2.3*cm]))
 
 # ---- start ----
 E += section("4", "Start it")
@@ -287,7 +300,10 @@ E.append(table(["Symptom", "Fix"],
       "from? Is the group registered? Check docker compose logs app — every message and "
       "every drop reason is logged."],
      ["Locked out of dashboard", "'Forgot password' sends a code to the admin's WhatsApp. "
-      "Gateway down too: docker compose exec app python -m app.cli reset-password"]],
+      "Gateway down too: docker compose exec app python -m app.cli reset-password"],
+     ["Want to switch WhatsApp engine (WEBJS/NOWEB/GOWS)", "Not a dashboard toggle — edit "
+      "the picker in .env, then docker compose up -d --force-recreate waha, then re-pair "
+      "(new QR expected). Full procedure in docs/TROUBLESHOOTING.md."]],
     [FW*0.38, FW*0.62]))
 E.append(Spacer(1, 6))
 E.append(P("<b>The restart cookbook</b> — from the install folder; none of these "

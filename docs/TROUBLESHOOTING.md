@@ -33,6 +33,32 @@ and the WEBJS engine (headless Chromium) is being killed. Keep the phone online,
 keep the number off other WhatsApp Web sessions, and on an 8 GB machine watch
 `docker stats waha` during a failure.
 
+## Switching WhatsApp engines (WEBJS / NOWEB / GOWS)
+The engine is a config choice made in `.env`, shown read-only on the Health
+page (`Engine: ...`) — there is no in-dashboard switch, because WAHA runs
+one engine per container and each engine keeps its own separate WhatsApp
+pairing. Changing it is a deliberate, disruptive step, not a toggle:
+
+1. In `.env`, comment out the block for your current engine/architecture and
+   uncomment the block for the one you want (see the picker in
+   `.env.example` — each block sets `WAHA_ENGINE` and `WAHA_TAG` together).
+2. Apply it: `docker compose up -d --force-recreate waha`. This only
+   recreates the gateway container — tasks, history, and the app are
+   untouched.
+3. Expect a fresh QR. Each engine has its own session namespace, so unless
+   you only changed architecture for the *same* engine, WhatsApp will need
+   re-pairing: Health page → **Re-pair (new QR)** → scan with the dedicated
+   number's phone.
+4. Re-test before relying on it: send yourself a task digest, post to one
+   group, and confirm group member replies are attributed to the right
+   person (this is the one place engines have historically differed — see
+   `taskwa-noweb-evaluation.md` if you're moving to NOWEB).
+
+Do this during a maintenance window, not while you're mid-recovery from a
+gateway or linking problem — recreating the container is itself a session
+disruption, and stacking it on top of an existing WhatsApp linking cooldown
+("can't link new devices right now") makes that cooldown worse, not better.
+
 ## Messages aren't arriving
 1. Is **dry-run** on? (yellow banner, Settings page). Dry-run logs instead of sending.
 2. Health page: is the session `WORKING`?

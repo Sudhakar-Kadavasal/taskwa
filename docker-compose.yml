@@ -7,6 +7,7 @@ services:
       - DATA_DIR=/data
       - BACKUP_DIR=/backups
       - WAHA_URL=http://waha:3000
+      - WAHA_ENGINE=${WAHA_ENGINE:-WEBJS}
     volumes:
       - ./data:/data
       - ./backups:/backups
@@ -23,6 +24,11 @@ services:
       - WHATSAPP_HOOK_EVENTS=message.any
       - WAHA_API_KEY=${WAHA_API_KEY}
       - WAHA_PRINT_QR=false
+      # Which engine to run — must match the WAHA_TAG image above (both are
+      # set together by the picker in .env.example). Also mirrored into the
+      # app's own env below (WAHA_ENGINE) purely so the dashboard can show
+      # it; the app never uses this to control WAHA.
+      - WHATSAPP_DEFAULT_ENGINE=${WAHA_ENGINE:-WEBJS}
     volumes:
       - ./data/waha:/app/.sessions
     ports:

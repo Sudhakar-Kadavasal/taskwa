@@ -8,6 +8,10 @@
     <span class="badge {% if status=='WORKING' %}b-done{% else %}b-blocked{% endif %}">{{ status }}</span>
     <span class="muted">checked {{ gateway_status_at | localtime }}</span>
   </p>
+  <p class="muted">Engine: <code>{{ waha_engine }}</code> — set in <code>.env</code>,
+     read-only here. Switching engines is a config change + rebuild + fresh
+     QR, not a button — see TROUBLESHOOTING.md &gt; "Switching WhatsApp
+     engines".</p>
   <p class="muted">Last digest run: {{ last_send | localtime }} ·
      Last backup: {{ last_backup | localtime }} ·
      All times in {{ tzname }}</p>

@@ -399,6 +399,13 @@ E.append(P("The message log at the bottom shows every outbound message with its 
            "including <b>dryrun</b> (not sent, dry-run on), <b>failed</b> (gateway error, "
            "shown), and <b>blocked</b> (recipient not registered — the allowlist refused it, "
            "which is the system protecting you)."))
+E.append(P("Just below the status badge, an <b>Engine</b> line shows which WhatsApp engine "
+           "(WEBJS, NOWEB or GOWS) the gateway is configured to run — read-only, set in "
+           "<font face='Mono'>.env</font> at install time. It's a config choice, not a "
+           "dashboard toggle: WAHA runs one engine per container with its own separate "
+           "pairing per engine, so changing it means editing <font face='Mono'>.env</font>, "
+           "rebuilding the gateway container, and re-pairing — see Installation Guide, "
+           "Troubleshooting."))
 
 E.append(P("When the session fails — restart vs re-pair", "h2"))
 E.append(P("A failed session is one of two things, and the two Health-page buttons match "

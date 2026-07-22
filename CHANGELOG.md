@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.7.3 — 2026-07-22
+
+- **WhatsApp engine is now a documented config-at-setup choice.** New
+  `WAHA_ENGINE` variable (`.env`), paired with the existing `WAHA_TAG`, picks
+  which of WAHA's three engines (WEBJS/NOWEB/GOWS) the gateway container
+  runs — `.env.example` now has one commented block per engine × CPU
+  architecture with a short why/why-not note on each, plus the exact
+  restart command to apply a change. This is a config change + container
+  rebuild + fresh QR re-pair, **not** a live in-dashboard toggle — WAHA
+  keeps one engine per container and a separate pairing per engine, so a
+  live switch isn't something to safely build. The Health page now shows
+  the configured engine read-only. See `docs/TROUBLESHOOTING.md` >
+  "Switching WhatsApp engines" for the full procedure.
+
 ## v1.6.5 — 2026-07-13
 
 - **Fix: names with a space broke `/nudge` and `/add`.** `@Ravi shankar

@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 import os
 
 from . import security, waha
+from .config import env
 from .db import get_setting, session_scope, set_setting
 from .engine import (bulk_add_members, change_status, create_task,
                      sort_tasks)
@@ -760,6 +761,7 @@ def health_page(request: Request):
             last_backup=get_setting(s, "last_backup"),
             tzname=get_setting(s, "timezone") or "UTC",
             gateway_status_at=get_setting(s, "gateway_status_at"),
+            waha_engine=env.waha_engine,
             log_rows=log_rows))
 
 
